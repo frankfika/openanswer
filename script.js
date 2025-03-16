@@ -283,19 +283,74 @@ async function startCapture() {
 
 // 调用百度 OCR API
 async function recognizeText(base64Image) {
+    // 获取OCR方法设置
+    const ocrMethod = window.API_CONFIG.ocrMethod || 'local';
+    
+    if (ocrMethod === 'local') {
+        return await recognizeTextLocal(base64Image);
+    } else {
+        return await recognizeTextBaidu(base64Image);
+    }
+}
+
+// 使用本地 Tesseract.js 进行 OCR
+async function recognizeTextLocal(base64Image) {
     try {
-        console.log('🔍 开始OCR处理...');
-        console.time('OCR处理');
+        console.log('🔍 开始本地OCR处理...');
+        console.time('本地OCR处理');
+        
+        const compressedImage = await compressImage(base64Image);
+        
+        // 添加超时控制
+        const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('本地OCR请求超时')), 15000); // 15秒超时
+        });
+        
+        const recognizePromise = Tesseract.recognize(
+            compressedImage,
+            'chi_sim+eng',
+            {
+                logger: m => {
+                    if (m.status === 'recognizing text') {
+                        updateStatus(`正在进行本地OCR识别: ${Math.floor(m.progress * 100)}%`);
+                    }
+                }
+            }
+        );
+        
+        const result = await Promise.race([recognizePromise, timeoutPromise]);
+        console.timeEnd('本地OCR处理');
+        
+        if (!result.data || !result.data.text) {
+            console.log('⚠️ 未检测到文字');
+            return '';
+        }
+        
+        const text = result.data.text.trim();
+        console.log('✅ 本地OCR完成:', text);
+        return text;
+    } catch (err) {
+        console.error('❌ 本地OCR错误:', err);
+        console.timeEnd('本地OCR处理');
+        throw err;
+    }
+}
+
+// 使用百度 OCR API
+async function recognizeTextBaidu(base64Image) {
+    try {
+        console.log('🔍 开始百度OCR处理...');
+        console.time('百度OCR处理');
         
         const compressedImage = await compressImage(base64Image);
         const imageData = compressedImage.replace(/^data:image\/(png|jpg|jpeg);base64,/, '');
         
-        console.log('📤 发送OCR请求...');
-        console.time('OCR API请求');
+        console.log('📤 发送百度OCR请求...');
+        console.time('百度OCR API请求');
 
         // 添加超时控制
         const timeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('OCR请求超时')), 10000); // 10秒超时
+            setTimeout(() => reject(new Error('百度OCR请求超时')), 10000); // 10秒超时
         });
 
         const fetchPromise = fetch('https://aip.baidubce.com/rest/2.0/ocr/v1/general_basic?access_token=' + window.API_CONFIG.baidu.accessToken, {
@@ -308,33 +363,33 @@ async function recognizeText(base64Image) {
         });
 
         const response = await Promise.race([fetchPromise, timeoutPromise]);
-        console.timeEnd('OCR API请求');
+        console.timeEnd('百度OCR API请求');
 
         if (!response.ok) {
             const errorText = await response.text();
-            console.error('OCR API错误响应:', errorText);
-            throw new Error(`OCR API 请求失败: ${response.status}, ${errorText}`);
+            console.error('百度OCR API错误响应:', errorText);
+            throw new Error(`百度OCR API 请求失败: ${response.status}, ${errorText}`);
         }
 
         const data = await response.json();
         if (data.error_code) {
-            console.error('OCR API返回错误:', data);
+            console.error('百度OCR API返回错误:', data);
             throw new Error(`百度 OCR 错误: ${data.error_msg} (错误码: ${data.error_code})`);
         }
 
         if (!data.words_result || data.words_result.length === 0) {
             console.log('⚠️ 未检测到文字');
-            console.timeEnd('OCR处理');
+            console.timeEnd('百度OCR处理');
             return '';
         }
 
         const result = data.words_result.map(item => item.words).join('\n');
-        console.log('✅ OCR完成:', result);
-        console.timeEnd('OCR处理');
+        console.log('✅ 百度OCR完成:', result);
+        console.timeEnd('百度OCR处理');
         return result;
     } catch (err) {
-        console.error('❌ OCR错误:', err);
-        console.timeEnd('OCR处理');
+        console.error('❌ 百度OCR错误:', err);
+        console.timeEnd('百度OCR处理');
         throw err;
     }
 }
@@ -656,11 +711,11 @@ async function init() {
         
         updateStatus('⚙️ 正在初始化...');
         
-        if (!window.API_CONFIG?.deepseek?.apiKey || !window.API_CONFIG?.baidu?.accessToken) {
-            console.log('⏳ 等待API配置加载...');
+        if (!window.API_CONFIG?.deepseek?.apiKey) {
+            console.log('⏳ 等待DeepSeek API配置加载...');
             await new Promise((resolve) => {
                 const checkConfig = () => {
-                    if (window.API_CONFIG?.deepseek?.apiKey && window.API_CONFIG?.baidu?.accessToken) {
+                    if (window.API_CONFIG?.deepseek?.apiKey) {
                         resolve();
                     } else {
                         setTimeout(checkConfig, 100);
@@ -668,6 +723,15 @@ async function init() {
                 };
                 checkConfig();
             });
+        }
+        
+        // 记录当前使用的OCR方法
+        console.log(`当前OCR方法: ${window.API_CONFIG.ocrMethod || 'local'}`);
+        
+        // 检查百度OCR API是否可用
+        if (window.API_CONFIG.ocrMethod === 'baidu' && !window.API_CONFIG?.baidu?.accessToken) {
+            console.warn('⚠️ 已选择百度OCR但API未配置，将自动降级到本地OCR');
+            window.API_CONFIG.ocrMethod = 'local';
         }
 
         console.log('✅ API配置已加载');

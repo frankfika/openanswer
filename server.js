@@ -58,12 +58,26 @@ app.get('/config', async (req, res) => {
     console.log('Config requested. Current config:', {
         hasEndpoint: !!process.env.DEEPSEEK_API_ENDPOINT,
         hasKey: !!process.env.DEEPSEEK_API_KEY,
-        endpoint: process.env.DEEPSEEK_API_ENDPOINT
+        endpoint: process.env.DEEPSEEK_API_ENDPOINT,
+        hasBaiduKey: !!process.env.BAIDU_API_KEY,
+        hasBaiduSecret: !!process.env.BAIDU_SECRET_KEY,
+        ocrMethod: process.env.OCR_METHOD || 'local'
     });
 
     try {
-        // 确保有有效的百度 token
-        const accessToken = await ensureValidToken();
+        let baiduAccessToken = null;
+        
+        // 只有在配置了百度API密钥时才获取token
+        if (process.env.BAIDU_API_KEY && process.env.BAIDU_SECRET_KEY) {
+            try {
+                baiduAccessToken = await ensureValidToken();
+            } catch (baiduError) {
+                console.warn('无法获取百度访问令牌:', baiduError.message);
+                // 继续执行，但不提供百度token
+            }
+        } else {
+            console.log('未配置百度OCR API，将使用本地OCR');
+        }
 
         res.json({
             deepseek: {
@@ -71,8 +85,9 @@ app.get('/config', async (req, res) => {
                 endpoint: process.env.DEEPSEEK_API_ENDPOINT || 'https://api.deepseek.com/v1/chat/completions'
             },
             baidu: {
-                accessToken: accessToken
-            }
+                accessToken: baiduAccessToken
+            },
+            ocrMethod: process.env.OCR_METHOD || 'local'
         });
     } catch (error) {
         console.error('Error in /config endpoint:', error);
