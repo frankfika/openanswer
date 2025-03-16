@@ -5,6 +5,8 @@ const ctx = canvas.getContext('2d');
 const answerContent = document.getElementById('answer-content');
 const statusContent = document.getElementById('status-content');
 const questionContent = document.getElementById('question-content');
+const progressContainer = document.getElementById('progress-container');
+const progressBar = document.getElementById('progress-bar');
 
 // 状态变量
 let lastRecognizedText = '';
@@ -44,6 +46,55 @@ function updateStatus(status, isError = false) {
     } else {
         statusContent.style.color = '#333';
     }
+    
+    // 处理进度条显示
+    if (status.includes('OCR识别:') || status.includes('简化OCR识别:')) {
+        showProgressBar();
+        const match = status.match(/(\d+)%/);
+        if (match && match[1]) {
+            updateProgressBar(parseInt(match[1]));
+        }
+    } else if (status.includes('正在进行') || status.includes('正在预处理') || status.includes('正在获取')) {
+        showProgressBar();
+        // 不确定进度时显示动画
+        updateProgressBar(-1);
+    } else {
+        hideProgressBar();
+    }
+}
+
+// 显示进度条
+function showProgressBar() {
+    if (progressContainer) {
+        progressContainer.style.display = 'block';
+    }
+}
+
+// 隐藏进度条
+function hideProgressBar() {
+    if (progressContainer) {
+        progressContainer.style.display = 'none';
+        // 重置进度
+        if (progressBar) {
+            progressBar.style.width = '0%';
+            progressBar.classList.remove('indeterminate');
+        }
+    }
+}
+
+// 更新进度条
+function updateProgressBar(percent) {
+    if (!progressBar) return;
+    
+    if (percent < 0) {
+        // 不确定进度时显示动画
+        progressBar.style.width = '100%';
+        progressBar.classList.add('indeterminate');
+    } else {
+        // 确定进度时显示百分比
+        progressBar.classList.remove('indeterminate');
+        progressBar.style.width = `${percent}%`;
+    }
 }
 
 // 更新问题显示
@@ -65,9 +116,21 @@ function updateQuestion(question) {
         }
     }
     
-    // 更新问题
+    // 更新问题，确保中文正确显示
     try {
+        // 使用textContent而不是innerHTML，避免XSS风险
         questionContent.textContent = question;
+        
+        // 设置字体和编码，确保中文正确显示
+        questionContent.style.fontFamily = "'PingFang SC', 'Microsoft YaHei', 'Hiragino Sans GB', 'Heiti SC', sans-serif";
+        
+        // 添加高亮效果
+        setTimeout(() => {
+            questionContent.classList.add('highlight');
+            setTimeout(() => {
+                questionContent.classList.remove('highlight');
+            }, 500);
+        }, 100);
     } catch (e) {
         console.error('更新问题失败:', e);
     }
@@ -208,17 +271,17 @@ function textSimilarity(a, b) {
     return similarity;
 }
 
-// 压缩图片
+// 压缩图片并进行预处理，提高OCR识别率
 function compressImage(base64Image) {
     return new Promise((resolve) => {
-        console.log('🔄 开始压缩图片...');
-        console.time('图片压缩');
+        console.log('🔄 开始图像预处理...');
+        console.time('图像预处理');
         const img = new Image();
         img.onload = () => {
             const tempCanvas = document.createElement('canvas');
             let width = img.width;
             let height = img.height;
-            const maxSize = 800;
+            const maxSize = 1600; // 进一步增加最大尺寸，提高清晰度
 
             if (width > height && width > maxSize) {
                 height = Math.floor((height * maxSize) / width);
@@ -231,10 +294,96 @@ function compressImage(base64Image) {
             tempCanvas.width = width;
             tempCanvas.height = height;
             const tempCtx = tempCanvas.getContext('2d');
+            
+            // 绘制原始图像
             tempCtx.drawImage(img, 0, 0, width, height);
-            const result = tempCanvas.toDataURL('image/jpeg', 0.6);
-            console.timeEnd('图片压缩');
-            console.log(`✅ 图片压缩完成: ${Math.round(result.length / 1024)}KB`);
+            
+            // 获取图像数据
+            const imageData = tempCtx.getImageData(0, 0, width, height);
+            const data = imageData.data;
+            
+            // 图像增强处理 - 自适应二值化
+            const grayscale = new Uint8Array(width * height);
+            
+            // 1. 转换为灰度
+            for (let i = 0, j = 0; i < data.length; i += 4, j++) {
+                grayscale[j] = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+            }
+            
+            // 2. 计算局部区域平均值 (使用简化的自适应阈值)
+            const blockSize = 25; // 局部区域大小
+            const C = 10; // 常数调整值
+            
+            for (let y = 0; y < height; y++) {
+                for (let x = 0; x < width; x++) {
+                    const idx = y * width + x;
+                    
+                    // 计算局部区域
+                    let startX = Math.max(0, x - Math.floor(blockSize/2));
+                    let endX = Math.min(width - 1, x + Math.floor(blockSize/2));
+                    let startY = Math.max(0, y - Math.floor(blockSize/2));
+                    let endY = Math.min(height - 1, y + Math.floor(blockSize/2));
+                    
+                    // 计算局部平均值
+                    let sum = 0;
+                    let count = 0;
+                    
+                    // 简化计算 - 只采样部分点
+                    for (let sy = startY; sy <= endY; sy += 3) {
+                        for (let sx = startX; sx <= endX; sx += 3) {
+                            sum += grayscale[sy * width + sx];
+                            count++;
+                        }
+                    }
+                    
+                    const avgValue = sum / count;
+                    
+                    // 应用自适应阈值
+                    const pixelValue = grayscale[idx];
+                    const threshold = avgValue - C;
+                    
+                    // 设置像素值
+                    const pixelIdx = idx * 4;
+                    const binaryValue = pixelValue < threshold ? 0 : 255;
+                    
+                    data[pixelIdx] = binaryValue;     // R
+                    data[pixelIdx + 1] = binaryValue; // G
+                    data[pixelIdx + 2] = binaryValue; // B
+                    // Alpha保持不变
+                }
+            }
+            
+            // 3. 锐化处理
+            const sharpenData = new Uint8ClampedArray(data);
+            const kernel = [
+                0, -1, 0,
+                -1, 5, -1,
+                0, -1, 0
+            ];
+            
+            for (let y = 1; y < height - 1; y++) {
+                for (let x = 1; x < width - 1; x++) {
+                    for (let c = 0; c < 3; c++) {
+                        let sum = 0;
+                        for (let ky = -1; ky <= 1; ky++) {
+                            for (let kx = -1; kx <= 1; kx++) {
+                                const idx = ((y + ky) * width + (x + kx)) * 4 + c;
+                                sum += data[idx] * kernel[(ky + 1) * 3 + (kx + 1)];
+                            }
+                        }
+                        sharpenData[(y * width + x) * 4 + c] = Math.min(255, Math.max(0, sum));
+                    }
+                }
+            }
+            
+            // 将处理后的图像数据放回canvas
+            const processedImageData = new ImageData(sharpenData, width, height);
+            tempCtx.putImageData(processedImageData, 0, 0);
+            
+            // 转换为base64
+            const result = tempCanvas.toDataURL('image/jpeg', 0.95); // 提高质量
+            console.timeEnd('图像预处理');
+            console.log(`✅ 图像预处理完成: ${Math.round(result.length / 1024)}KB`);
             resolve(result);
         };
         img.src = base64Image;
@@ -281,15 +430,39 @@ async function startCapture() {
     }
 }
 
-// 调用百度 OCR API
+// 选择并执行OCR方法
 async function recognizeText(base64Image) {
     // 获取OCR方法设置
-    const ocrMethod = window.API_CONFIG.ocrMethod || 'local';
+    const ocrMethod = window.API_CONFIG?.ocrMethod || 'local';
     
-    if (ocrMethod === 'local') {
-        return await recognizeTextLocal(base64Image);
-    } else {
-        return await recognizeTextBaidu(base64Image);
+    console.log(`使用OCR方法: ${ocrMethod}`);
+    
+    try {
+        if (ocrMethod === 'baidu') {
+            // 检查百度OCR配置
+            if (!window.API_CONFIG?.baidu?.accessToken) {
+                if (window.API_CONFIG?.baidu?.error) {
+                    throw new Error(`百度OCR配置错误: ${window.API_CONFIG.baidu.error}`);
+                } else {
+                    throw new Error('百度OCR未正确配置，将回退到本地OCR');
+                }
+            }
+            return await recognizeTextBaidu(base64Image);
+        } else {
+            // 默认使用本地OCR
+            return await recognizeTextLocal(base64Image);
+        }
+    } catch (error) {
+        console.error(`OCR方法 ${ocrMethod} 失败:`, error);
+        
+        // 如果百度OCR失败，尝试回退到本地OCR
+        if (ocrMethod === 'baidu') {
+            console.log('尝试回退到本地OCR...');
+            updateStatus('百度OCR失败，尝试使用本地OCR...');
+            return await recognizeTextLocal(base64Image);
+        }
+        
+        throw error;
     }
 }
 
@@ -299,41 +472,233 @@ async function recognizeTextLocal(base64Image) {
         console.log('🔍 开始本地OCR处理...');
         console.time('本地OCR处理');
         
+        updateStatus('正在预处理图像...');
         const compressedImage = await compressImage(base64Image);
         
-        // 添加超时控制
-        const timeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('本地OCR请求超时')), 15000); // 15秒超时
-        });
+        updateStatus('正在进行本地OCR识别...');
         
-        const recognizePromise = Tesseract.recognize(
-            compressedImage,
+        // 多次OCR尝试，使用不同的预处理参数
+        try {
+            // 添加超时控制
+            const controller = new AbortController();
+            const signal = controller.signal;
+            const timeoutId = setTimeout(() => controller.abort(), 25000); // 25秒超时
+            
+            // 创建带信号的Promise
+            const results = await Promise.all([
+                // 尝试1: 标准参数
+                recognizeWithParams(compressedImage, {
+                    tessedit_pageseg_mode: '6', // 假设单个统一的文本块
+                    tessedit_ocr_engine_mode: '2', // 使用LSTM引擎
+                    preserve_interword_spaces: '1'
+                }, signal),
+                
+                // 尝试2: 优化中文参数
+                recognizeWithParams(compressedImage, {
+                    tessedit_pageseg_mode: '3', // 列模式
+                    tessedit_ocr_engine_mode: '2',
+                    preserve_interword_spaces: '0',
+                    textord_heavy_nr: '1'
+                }, signal)
+            ]).finally(() => clearTimeout(timeoutId));
+            
+            // 合并结果
+            const mergedText = mergeOcrResults(results);
+            console.timeEnd('本地OCR处理');
+            
+            if (!mergedText) {
+                console.log('⚠️ 未检测到文字');
+                return '';
+            }
+            
+            // 后处理识别文本
+            const processedText = postProcessChineseText(mergedText);
+            
+            console.log('✅ 本地OCR完成:', processedText);
+            return processedText;
+        } catch (error) {
+            if (error.name === 'AbortError') {
+                console.error('OCR处理超时');
+                updateStatus('OCR处理超时，尝试简化处理...');
+                
+                // 超时后的简化处理 - 只尝试一次识别，使用更简单的参数
+                try {
+                    const simpleResult = await Tesseract.recognize(
+                        compressedImage,
+                        'chi_sim+eng',
+                        {
+                            logger: m => {
+                                if (m.status === 'recognizing text') {
+                                    updateStatus(`简化OCR识别: ${Math.floor(m.progress * 100)}%`);
+                                }
+                            },
+                            tessedit_pageseg_mode: '6',
+                            tessedit_ocr_engine_mode: '2'
+                        }
+                    );
+                    
+                    if (!simpleResult.data || !simpleResult.data.text) {
+                        return '';
+                    }
+                    
+                    const processedText = postProcessChineseText(simpleResult.data.text.trim());
+                    console.log('✅ 简化OCR完成:', processedText);
+                    return processedText;
+                } catch (fallbackError) {
+                    console.error('简化OCR也失败:', fallbackError);
+                    return '';
+                }
+            } else {
+                throw error;
+            }
+        }
+    } catch (err) {
+        console.error('❌ 本地OCR错误:', err);
+        console.timeEnd('本地OCR处理');
+        throw err;
+    }
+}
+
+// 使用指定参数进行OCR识别
+async function recognizeWithParams(image, params, signal) {
+    try {
+        const result = await Tesseract.recognize(
+            image,
             'chi_sim+eng',
             {
                 logger: m => {
                     if (m.status === 'recognizing text') {
                         updateStatus(`正在进行本地OCR识别: ${Math.floor(m.progress * 100)}%`);
                     }
-                }
+                },
+                ...params,
+                tessjs_create_pdf: '0',
+                tessjs_create_hocr: '0',
+                tessjs_create_tsv: '0',
+                tessjs_create_box: '0',
+                tessjs_create_unlv: '0',
+                tessjs_create_osd: '0'
             }
         );
         
-        const result = await Promise.race([recognizePromise, timeoutPromise]);
-        console.timeEnd('本地OCR处理');
-        
-        if (!result.data || !result.data.text) {
-            console.log('⚠️ 未检测到文字');
-            return '';
+        // 检查是否已中止
+        if (signal && signal.aborted) {
+            throw new DOMException('Aborted', 'AbortError');
         }
         
-        const text = result.data.text.trim();
-        console.log('✅ 本地OCR完成:', text);
-        return text;
-    } catch (err) {
-        console.error('❌ 本地OCR错误:', err);
-        console.timeEnd('本地OCR处理');
-        throw err;
+        return result.data.text.trim();
+    } catch (error) {
+        console.error('OCR识别尝试失败:', error);
+        return '';
     }
+}
+
+// 合并多个OCR结果
+function mergeOcrResults(results) {
+    // 过滤掉空结果
+    const validResults = results.filter(text => text && text.length > 0);
+    
+    if (validResults.length === 0) {
+        return '';
+    }
+    
+    if (validResults.length === 1) {
+        return validResults[0];
+    }
+    
+    // 选择最长的结果作为基础
+    let bestResult = '';
+    let maxLength = 0;
+    
+    for (const text of validResults) {
+        if (text.length > maxLength) {
+            maxLength = text.length;
+            bestResult = text;
+        }
+    }
+    
+    console.log('合并OCR结果:', validResults);
+    
+    return bestResult;
+}
+
+// 中文文本后处理函数
+function postProcessChineseText(text) {
+    if (!text) return text;
+    
+    console.log('开始中文文本后处理...');
+    
+    // 1. 移除多余的空格和换行
+    text = text.replace(/\s+/g, ' ').replace(/\n+/g, '\n').trim();
+    
+    // 2. 修复常见OCR错误
+    const commonErrors = {
+        '曰': '日', '己': '已', '末': '未', '象': '像', '專': '专',
+        '車': '车', '傳': '传', '東': '东', '馬': '马', '個': '个',
+        '來': '来', '這': '这', '們': '们', '後': '后', '時': '时',
+        '從': '从', '會': '会', '對': '对', '長': '长', '開': '开',
+        '問': '问', '題': '题', '號': '号', '説': '说', '話': '话',
+        '國': '国', '園': '园', '圖': '图', '書': '书', '壹': '一',
+        '貳': '二', '參': '三', '肆': '四', '伍': '五', '陸': '六',
+        '柒': '七', '捌': '八', '玖': '九', '拾': '十', '佰': '百',
+        '仟': '千', '萬': '万', '億': '亿', '為': '为', '與': '与',
+        '產': '产', '務': '务', '學': '学', '實': '实', '發': '发',
+        '電': '电', '網': '网', '經': '经', '點': '点', '麼': '么',
+        '請': '请', '認': '认', '關': '关', '幾': '几', '樣': '样',
+        '當': '当', '讓': '让', '應': '应', '裏': '里', '麗': '丽',
+        '無': '无', '處': '处', '體': '体', '還': '还', '兒': '儿',
+        '婦': '妇', '見': '见', '觀': '观', '現': '现', '實': '实',
+        '過': '过', '內': '内', '幫': '帮', '係': '系', '樂': '乐',
+        '極': '极', '權': '权', '壓': '压', '紅': '红', '綠': '绿',
+        '藍': '蓝', '紫': '紫', '數': '数', '線': '线', '練': '练',
+        '終': '终', '結': '结', '構': '构', '達': '达', '歲': '岁',
+        '務': '务', '員': '员', '財': '财', '萌': '萌', '頭': '头',
+        '項': '项', '強': '强', '難': '难', '風': '风', '響': '响',
+        '響': '响', '響': '响', '響': '响', '響': '响', '響': '响'
+    };
+    
+    // 应用常见错误修复
+    for (const [error, correction] of Object.entries(commonErrors)) {
+        text = text.replace(new RegExp(error, 'g'), correction);
+    }
+    
+    // 3. 修复标点符号
+    text = text
+        .replace(/，/g, ',')
+        .replace(/。/g, '.')
+        .replace(/：/g, ':')
+        .replace(/；/g, ';')
+        .replace(/！/g, '!')
+        .replace(/？/g, '?')
+        .replace(/（/g, '(')
+        .replace(/）/g, ')')
+        .replace(/【/g, '[')
+        .replace(/】/g, ']')
+        .replace(/《/g, '<')
+        .replace(/》/g, '>')
+        .replace(/"/g, '"')
+        .replace(/"/g, '"')
+        .replace(/'/g, '\'')
+        .replace(/'/g, '\'');
+    
+    // 4. 修复数字和字母混淆
+    text = text
+        .replace(/[oO０]/g, '0')
+        .replace(/[lI１]/g, '1')
+        .replace(/[zZ２]/g, '2')
+        .replace(/３/g, '3')
+        .replace(/４/g, '4')
+        .replace(/５/g, '5')
+        .replace(/６/g, '6')
+        .replace(/７/g, '7')
+        .replace(/８/g, '8')
+        .replace(/９/g, '9');
+    
+    // 5. 移除非打印字符和特殊符号
+    text = text.replace(/[^\u4e00-\u9fa5a-zA-Z0-9.,?!;:'"()\[\]{}<>\/\\\s\-_+=@#$%^&*|~`]/g, '');
+    
+    console.log('中文文本后处理完成');
+    return text;
 }
 
 // 使用百度 OCR API
@@ -342,9 +707,11 @@ async function recognizeTextBaidu(base64Image) {
         console.log('🔍 开始百度OCR处理...');
         console.time('百度OCR处理');
         
+        updateStatus('正在压缩图像...');
         const compressedImage = await compressImage(base64Image);
         const imageData = compressedImage.replace(/^data:image\/(png|jpg|jpeg);base64,/, '');
         
+        updateStatus('正在发送百度OCR请求...');
         console.log('📤 发送百度OCR请求...');
         console.time('百度OCR API请求');
 
@@ -353,13 +720,14 @@ async function recognizeTextBaidu(base64Image) {
             setTimeout(() => reject(new Error('百度OCR请求超时')), 10000); // 10秒超时
         });
 
-        const fetchPromise = fetch('https://aip.baidubce.com/rest/2.0/ocr/v1/general_basic?access_token=' + window.API_CONFIG.baidu.accessToken, {
+        // 使用通用文字识别（高精度版）API
+        const fetchPromise = fetch('https://aip.baidubce.com/rest/2.0/ocr/v1/accurate_basic?access_token=' + window.API_CONFIG.baidu.accessToken, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
                 'Accept': 'application/json'
             },
-            body: 'image=' + encodeURIComponent(imageData)
+            body: 'image=' + encodeURIComponent(imageData) + '&language_type=CHN_ENG&detect_direction=true&paragraph=true&probability=true'
         });
 
         const response = await Promise.race([fetchPromise, timeoutPromise]);
@@ -383,6 +751,7 @@ async function recognizeTextBaidu(base64Image) {
             return '';
         }
 
+        // 使用段落模式组织文本
         const result = data.words_result.map(item => item.words).join('\n');
         console.log('✅ 百度OCR完成:', result);
         console.timeEnd('百度OCR处理');
@@ -397,7 +766,7 @@ async function recognizeTextBaidu(base64Image) {
 // 调用 DeepSeek API
 async function callDeepSeekAPI(text) {
     if (!window.API_CONFIG?.deepseek?.apiKey) {
-        throw new Error('API 配置未找到或不完整');
+        throw new Error('DeepSeek API 配置未找到或不完整');
     }
 
     try {
@@ -405,11 +774,14 @@ async function callDeepSeekAPI(text) {
             text: text.substring(0, 100) + (text.length > 100 ? '...' : '')
         });
         
-        const endpoint = 'https://api.deepseek.com/v1/chat/completions';
+        const endpoint = window.API_CONFIG.deepseek.endpoint || 'https://api.deepseek.com/v1/chat/completions';
         console.log('发送请求到:', endpoint);
         
-        // 优化提示词，让回答更简洁
-        const systemPrompt = "你是一个帮助回答问题的助手。请仔细阅读问题并给出准确、简洁的答案。避免不必要的解释和冗长的回复。直接回答问题的核心内容。";
+        // 优化提示词，让回答更简洁，并确保中文处理正确
+        const systemPrompt = "你是一个帮助回答问题的助手。请仔细阅读问题并给出准确、简洁的答案。避免不必要的解释和冗长的回复。直接回答问题的核心内容。如果问题是中文，请用中文回答；如果问题是英文，请用英文回答。";
+        
+        // 检查文本是否包含中文
+        const containsChinese = /[\u4e00-\u9fa5]/.test(text);
         
         const requestBody = {
             model: "deepseek-chat",
@@ -425,7 +797,9 @@ async function callDeepSeekAPI(text) {
             ],
             temperature: 0.5,  // 降低温度，使回答更确定
             max_tokens: 800,
-            stream: false
+            stream: false,
+            // 如果包含中文，设置响应格式为中文
+            response_format: containsChinese ? { type: "text" } : undefined
         };
         
         console.log('请求体:', JSON.stringify({
@@ -554,10 +928,8 @@ async function processFrame(currentTime) {
 
         // 文本预处理：移除多余空格和换行
         if (recognizedText) {
-            recognizedText = recognizedText
-                .replace(/\s+/g, ' ')
-                .replace(/\n+/g, '\n')
-                .trim();
+            // 使用专门的中文文本处理函数
+            recognizedText = processChineseText(recognizedText);
         }
 
         if (recognizedText && recognizedText.length > 10) {
@@ -643,9 +1015,11 @@ async function processFrame(currentTime) {
                 } catch (err) {
                     console.error('❌ AI回答错误:', err);
                     updateStatus(`❌ 获取回答失败: ${err.message}`, true);
-                    updateAnswer('获取回答时出错，请稍后再试', true);
-                    // 不重置文本，避免重复调用API
-                    // lastRecognizedText = '';
+                    
+                    // 如果是API错误，提供更具体的错误信息
+                    if (err.message.includes('API') || err.message.includes('token')) {
+                        updateAnswer(`获取回答失败: ${err.message}\n\n请检查API配置是否正确，或者API密钥是否有效。`, true);
+                    }
                 }
             } else {
                 console.log('⏭️ 文本相似，跳过处理');
@@ -670,6 +1044,58 @@ async function processFrame(currentTime) {
 
     isProcessing = false;
     requestAnimationFrame(processFrame);
+}
+
+// 处理中文文本，优化识别结果
+function processChineseText(text) {
+    if (!text) return text;
+    
+    console.log('开始处理识别文本...');
+    console.log('原始文本:', text);
+    
+    // 1. 基本清理
+    text = text
+        .replace(/\s+/g, ' ')
+        .replace(/\n+/g, '\n')
+        .trim();
+    
+    // 2. 移除非打印字符和特殊符号
+    text = text.replace(/[^\u4e00-\u9fa5a-zA-Z0-9.,?!;:'"()\[\]{}<>\/\\\s\-_+=@#$%^&*|~`]/g, '');
+    
+    // 3. 修复常见OCR错误
+    text = postProcessChineseText(text);
+    
+    // 4. 智能分段处理
+    text = smartParagraphProcessing(text);
+    
+    console.log('处理后文本:', text);
+    return text;
+}
+
+// 智能分段处理
+function smartParagraphProcessing(text) {
+    // 检测是否为问题文本
+    const isQuestion = /[?？]/.test(text) || 
+                      /^(what|how|why|when|where|which|who|whose|whom|是什么|如何|为什么|什么时候|在哪里|哪一个|谁|谁的)/i.test(text);
+    
+    // 如果是问题，尝试提取核心问题
+    if (isQuestion) {
+        // 按句子分割
+        const sentences = text.split(/[.。!！?？]/g).filter(s => s.trim().length > 0);
+        
+        // 找到包含问号的句子或最后一个句子
+        const questionSentences = sentences.filter(s => /[?？]/.test(s));
+        if (questionSentences.length > 0) {
+            // 如果有问号句子，使用它们
+            return questionSentences.join(' ').trim();
+        } else if (sentences.length > 0) {
+            // 否则使用最后一个句子作为问题
+            return sentences[sentences.length - 1].trim();
+        }
+    }
+    
+    // 如果不是问题或无法提取，返回原文本
+    return text;
 }
 
 // 初始化应用
@@ -709,39 +1135,55 @@ async function init() {
             }
         }
         
-        updateStatus('⚙️ 正在初始化...');
-        
-        if (!window.API_CONFIG?.deepseek?.apiKey) {
-            console.log('⏳ 等待DeepSeek API配置加载...');
-            await new Promise((resolve) => {
-                const checkConfig = () => {
-                    if (window.API_CONFIG?.deepseek?.apiKey) {
-                        resolve();
-                    } else {
-                        setTimeout(checkConfig, 100);
-                    }
-                };
-                checkConfig();
-            });
+        // 显示OCR模式
+        const ocrModeElement = document.getElementById('ocr-mode');
+        if (ocrModeElement) {
+            const ocrMethod = window.API_CONFIG.ocrMethod || 'local';
+            ocrModeElement.textContent = ocrMethod === 'local' ? '本地识别' : '百度云识别';
         }
         
-        // 记录当前使用的OCR方法
-        console.log(`当前OCR方法: ${window.API_CONFIG.ocrMethod || 'local'}`);
+        // 检查配置
+        const checkConfig = () => {
+            // 检查DeepSeek API配置
+            if (!window.API_CONFIG?.deepseek?.apiKey) {
+                updateStatus('❌ DeepSeek API密钥未配置，请检查.env文件', true);
+                return false;
+            }
+            
+            // 检查OCR配置
+            const ocrMethod = window.API_CONFIG.ocrMethod || 'local';
+            if (ocrMethod === 'baidu' && !window.API_CONFIG?.baidu?.accessToken) {
+                if (window.API_CONFIG?.baidu?.error) {
+                    updateStatus(`⚠️ 百度OCR配置错误: ${window.API_CONFIG.baidu.error}，将使用本地OCR`, true);
+                } else {
+                    updateStatus('⚠️ 百度OCR未正确配置，将使用本地OCR', true);
+                }
+            }
+            
+            return true;
+        };
         
-        // 检查百度OCR API是否可用
-        if (window.API_CONFIG.ocrMethod === 'baidu' && !window.API_CONFIG?.baidu?.accessToken) {
-            console.warn('⚠️ 已选择百度OCR但API未配置，将自动降级到本地OCR');
-            window.API_CONFIG.ocrMethod = 'local';
+        // 检查配置
+        if (!checkConfig()) {
+            return;
         }
-
-        console.log('✅ API配置已加载');
-        updateStatus('🎥 请选择要共享的窗口...');
+        
+        // 开始捕获
+        updateStatus('正在准备捕获屏幕...');
         await startCapture();
+        
+        // 开始处理帧
+        requestAnimationFrame(processFrame);
     } catch (err) {
-        console.error('❌ 初始化错误:', err);
+        console.error('初始化错误:', err);
         updateStatus('❌ 初始化失败: ' + err.message, true);
     }
 }
 
-// 启动应用
-init(); 
+// 如果配置已加载，则初始化应用
+if (window.API_CONFIG) {
+    init();
+} else {
+    console.error('API配置未加载');
+    updateStatus('❌ API配置未加载，请刷新页面重试', true);
+} 

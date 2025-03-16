@@ -18,6 +18,10 @@ let tokenExpireTime = 0;
 // 获取百度 access token
 async function getBaiduAccessToken() {
     try {
+        if (!process.env.BAIDU_API_KEY || !process.env.BAIDU_SECRET_KEY) {
+            throw new Error('百度OCR API密钥未配置');
+        }
+        
         const response = await fetch(`https://aip.baidubce.com/oauth/2.0/token?grant_type=client_credentials&client_id=${process.env.BAIDU_API_KEY}&client_secret=${process.env.BAIDU_SECRET_KEY}`);
         
         if (!response.ok) {
@@ -55,28 +59,42 @@ app.use((req, res, next) => {
 
 // 提供配置接口
 app.get('/config', async (req, res) => {
+    // 确定OCR方法
+    const ocrMethod = process.env.OCR_METHOD || 'local';
+    
     console.log('Config requested. Current config:', {
         hasEndpoint: !!process.env.DEEPSEEK_API_ENDPOINT,
         hasKey: !!process.env.DEEPSEEK_API_KEY,
         endpoint: process.env.DEEPSEEK_API_ENDPOINT,
         hasBaiduKey: !!process.env.BAIDU_API_KEY,
         hasBaiduSecret: !!process.env.BAIDU_SECRET_KEY,
-        ocrMethod: process.env.OCR_METHOD || 'local'
+        ocrMethod: ocrMethod
     });
 
     try {
-        let baiduAccessToken = null;
+        // 检查DeepSeek API配置
+        if (!process.env.DEEPSEEK_API_KEY) {
+            return res.status(400).json({
+                error: '未配置DeepSeek API密钥，请在.env文件中设置DEEPSEEK_API_KEY'
+            });
+        }
         
-        // 只有在配置了百度API密钥时才获取token
-        if (process.env.BAIDU_API_KEY && process.env.BAIDU_SECRET_KEY) {
-            try {
-                baiduAccessToken = await ensureValidToken();
-            } catch (baiduError) {
-                console.warn('无法获取百度访问令牌:', baiduError.message);
-                // 继续执行，但不提供百度token
+        let baiduAccessToken = null;
+        let baiduError = null;
+        
+        // 如果使用百度OCR，则获取token
+        if (ocrMethod === 'baidu') {
+            if (!process.env.BAIDU_API_KEY || !process.env.BAIDU_SECRET_KEY) {
+                baiduError = '未配置百度OCR API密钥，但OCR_METHOD设置为baidu。请在.env文件中设置BAIDU_API_KEY和BAIDU_SECRET_KEY，或将OCR_METHOD改为local';
+                console.warn(baiduError);
+            } else {
+                try {
+                    baiduAccessToken = await ensureValidToken();
+                } catch (error) {
+                    baiduError = `无法获取百度访问令牌: ${error.message}`;
+                    console.warn(baiduError);
+                }
             }
-        } else {
-            console.log('未配置百度OCR API，将使用本地OCR');
         }
 
         res.json({
@@ -85,9 +103,10 @@ app.get('/config', async (req, res) => {
                 endpoint: process.env.DEEPSEEK_API_ENDPOINT || 'https://api.deepseek.com/v1/chat/completions'
             },
             baidu: {
-                accessToken: baiduAccessToken
+                accessToken: baiduAccessToken,
+                error: baiduError
             },
-            ocrMethod: process.env.OCR_METHOD || 'local'
+            ocrMethod: ocrMethod
         });
     } catch (error) {
         console.error('Error in /config endpoint:', error);
@@ -108,6 +127,7 @@ app.listen(port, () => {
     console.log('Environment variables loaded:', {
         hasEndpoint: !!process.env.DEEPSEEK_API_ENDPOINT,
         hasKey: !!process.env.DEEPSEEK_API_KEY,
-        endpoint: process.env.DEEPSEEK_API_ENDPOINT
+        endpoint: process.env.DEEPSEEK_API_ENDPOINT,
+        ocrMethod: process.env.OCR_METHOD || 'local'
     });
 }); 

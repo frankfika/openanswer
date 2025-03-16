@@ -3,8 +3,37 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
     <title>OpenAnswer</title>
     <link rel="stylesheet" href="style.css">
+    <style>
+        @font-face {
+            font-family: 'Chinese Font';
+            src: local('PingFang SC'), local('Microsoft YaHei'), local('Hiragino Sans GB'), local('Heiti SC');
+            font-weight: normal;
+            font-style: normal;
+        }
+        body {
+            font-family: 'Chinese Font', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+        
+        /* OCR进度指示器 */
+        .progress-container {
+            margin-top: 10px;
+            background-color: #f0f0f0;
+            border-radius: 4px;
+            height: 8px;
+            overflow: hidden;
+            display: none;
+        }
+        
+        .progress-bar {
+            height: 100%;
+            width: 0%;
+            background-color: #0d6efd;
+            transition: width 0.3s ease;
+        }
+    </style>
 </head>
 <body>
     <div class="container">
@@ -13,12 +42,19 @@
             <canvas id="canvas" style="display: none;"></canvas>
             <div class="video-info">
                 <p>请选择要共享的窗口，确保窗口中有清晰的文字内容</p>
+                <p class="tips">提示：共享整个屏幕或应用窗口效果最佳，避免共享浏览器标签页</p>
             </div>
         </div>
         <div class="qa-container">
             <div id="status" class="status">
                 <h3>状态：</h3>
                 <p id="status-content">正在加载配置...</p>
+                <div class="progress-container" id="progress-container">
+                    <div class="progress-bar" id="progress-bar"></div>
+                </div>
+                <div class="ocr-info">
+                    <p>OCR模式: <span id="ocr-mode">加载中...</span></p>
+                </div>
             </div>
             <div id="question" class="question">
                 <h3>识别的问题：</h3>
@@ -32,6 +68,7 @@
     </div>
     <footer>
         <p>每 4 秒自动识别一次屏幕内容。如果答案未更新，请稍等片刻或调整窗口位置。</p>
+        <p class="help-text">如遇问题：1) 确保文字清晰可见 2) 尝试调整窗口大小 3) 检查网络连接</p>
     </footer>
     <script src="https://unpkg.com/tesseract.js@v4.1.1/dist/tesseract.min.js"></script>
     <script>
@@ -43,6 +80,14 @@
                     throw new Error('配置加载失败');
                 }
                 window.API_CONFIG = await response.json();
+                
+                // 显示OCR模式
+                const ocrModeElement = document.getElementById('ocr-mode');
+                if (ocrModeElement) {
+                    const ocrMethod = window.API_CONFIG.ocrMethod || 'local';
+                    ocrModeElement.textContent = ocrMethod === 'local' ? '本地识别' : '百度云识别';
+                }
+                
                 // 加载主应用脚本
                 const script = document.createElement('script');
                 script.src = 'script.js';
