@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenAnswer</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <div class="video-container">
+            <video id="video" autoplay playsinline></video>
+            <canvas id="canvas" style="display: none;"></canvas>
+            <div class="video-info">
+                <p>请选择要共享的窗口，确保窗口中有清晰的文字内容</p>
+            </div>
+        </div>
+        <div class="qa-container">
+            <div id="status" class="status">
+                <h3>状态：</h3>
+                <p id="status-content">正在加载配置...</p>
+            </div>
+            <div id="question" class="question">
+                <h3>识别的问题：</h3>
+                <p id="question-content"></p>
+            </div>
+            <div id="answer" class="answer">
+                <h3>AI 回答：</h3>
+                <p id="answer-content"></p>
+            </div>
+        </div>
+    </div>
+    <footer>
+        <p>每 4 秒自动识别一次屏幕内容。如果答案未更新，请稍等片刻或调整窗口位置。</p>
+    </footer>
+    <script src="https://unpkg.com/tesseract.js@v4.1.1/dist/tesseract.min.js"></script>
+    <script>
+        // 等待配置加载完成后再初始化应用
+        window.onload = async function() {
+            try {
+                const response = await fetch('/config');
+                if (!response.ok) {
+                    throw new Error('配置加载失败');
+                }
+                window.API_CONFIG = await response.json();
+                // 加载主应用脚本
+                const script = document.createElement('script');
+                script.src = 'script.js';
+                document.body.appendChild(script);
+            } catch (error) {
+                console.error('Error loading config:', error);
+                document.getElementById('status-content').textContent = '错误：无法加载 API 配置';
+            }
+        };
+    </script>
+</body>
+</html> 
