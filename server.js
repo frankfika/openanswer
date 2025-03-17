@@ -1,12 +1,19 @@
 const express = require('express');
 const path = require('path');
-require('dotenv').config();  // 确保在这里也加载环境变量
-const config = require('./config');
 const dotenv = require('dotenv');
 const fetch = require('node-fetch');
 
-// 加载环境变量
-dotenv.config();
+// 强制重新加载环境变量
+dotenv.config({ override: true });
+
+// 在加载配置之前确保环境变量已经加载
+console.log('Loading environment variables...');
+console.log('LLM_MODEL:', process.env.LLM_MODEL);
+console.log('OCR_METHOD:', process.env.OCR_METHOD);
+console.log('SILICONFLOW_MODEL:', process.env.SILICONFLOW_MODEL);
+
+// 加载配置
+const config = require('./config');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -57,63 +64,27 @@ app.use((req, res, next) => {
     next();
 });
 
+// 添加解析JSON请求体的中间件
+app.use(express.json());
+
 // 提供配置接口
-app.get('/config', async (req, res) => {
-    // 确定OCR方法
-    const ocrMethod = process.env.OCR_METHOD || 'local';
-    
-    console.log('Config requested. Current config:', {
-        hasEndpoint: !!process.env.DEEPSEEK_API_ENDPOINT,
-        hasKey: !!process.env.DEEPSEEK_API_KEY,
-        endpoint: process.env.DEEPSEEK_API_ENDPOINT,
-        hasBaiduKey: !!process.env.BAIDU_API_KEY,
-        hasBaiduSecret: !!process.env.BAIDU_SECRET_KEY,
-        ocrMethod: ocrMethod
-    });
-
-    try {
-        // 检查DeepSeek API配置
-        if (!process.env.DEEPSEEK_API_KEY) {
-            return res.status(400).json({
-                error: '未配置DeepSeek API密钥，请在.env文件中设置DEEPSEEK_API_KEY'
-            });
-        }
-        
-        let baiduAccessToken = null;
-        let baiduError = null;
-        
-        // 如果使用百度OCR，则获取token
-        if (ocrMethod === 'baidu') {
-            if (!process.env.BAIDU_API_KEY || !process.env.BAIDU_SECRET_KEY) {
-                baiduError = '未配置百度OCR API密钥，但OCR_METHOD设置为baidu。请在.env文件中设置BAIDU_API_KEY和BAIDU_SECRET_KEY，或将OCR_METHOD改为local';
-                console.warn(baiduError);
-            } else {
-                try {
-                    baiduAccessToken = await ensureValidToken();
-                } catch (error) {
-                    baiduError = `无法获取百度访问令牌: ${error.message}`;
-                    console.warn(baiduError);
-                }
-            }
-        }
-
-        res.json({
-            deepseek: {
-                apiKey: process.env.DEEPSEEK_API_KEY,
-                endpoint: process.env.DEEPSEEK_API_ENDPOINT || 'https://api.deepseek.com/v1/chat/completions'
-            },
-            baidu: {
-                accessToken: baiduAccessToken,
-                error: baiduError
-            },
-            ocrMethod: ocrMethod
-        });
-    } catch (error) {
-        console.error('Error in /config endpoint:', error);
-        res.status(500).json({
-            error: '获取配置失败: ' + error.message
-        });
-    }
+app.get('/config', (req, res) => {
+  const configResponse = {
+    hasEndpoint: config.llmModel === 'siliconflow' 
+      ? !!process.env.SILICONFLOW_API_ENDPOINT 
+      : !!process.env.DEEPSEEK_API_ENDPOINT,
+    hasKey: config.llmModel === 'siliconflow'
+      ? !!process.env.SILICONFLOW_API_KEY
+      : !!process.env.DEEPSEEK_API_KEY,
+    endpoint: config.apiEndpoint,
+    hasBaiduKey: !!process.env.BAIDU_API_KEY,
+    hasBaiduSecret: !!process.env.BAIDU_SECRET_KEY,
+    ocrMethod: process.env.OCR_METHOD || 'local',
+    llmModel: config.llmModel,
+    siliconflowModel: config.siliconflowModel
+  };
+  console.log('Config requested. Current config:', configResponse);
+  res.json(configResponse);
 });
 
 // 错误处理中间件
@@ -122,12 +93,75 @@ app.use((err, req, res, next) => {
     res.status(500).json({ error: 'Internal server error' });
 });
 
+app.post('/chat', async (req, res) => {
+  const { messages } = req.body;
+  
+  if (!config.apiKey) {
+    return res.status(400).json({ error: 'API key not configured' });
+  }
+
+  try {
+    const startTime = Date.now();
+    console.log(`Sending request to ${config.apiEndpoint} with model: ${config.llmModel === 'siliconflow' ? config.siliconflowModel : 'deepseek-chat'}`);
+    
+    // 添加超时控制
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000); // 20秒超时
+    
+    try {
+      const response = await fetch(config.apiEndpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${config.apiKey}`
+        },
+        body: JSON.stringify({
+          model: config.llmModel === 'siliconflow' ? config.siliconflowModel : 'deepseek-chat',
+          messages: messages,
+          temperature: 0.5,  // 降低温度，使回答更确定
+          max_tokens: 800    // 限制生成的token数量
+        }),
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+      
+      const endTime = Date.now();
+      console.log(`API response received in ${endTime - startTime}ms`);
+      
+      if (!response.ok) {
+        const errorData = await response.text();
+        console.error(`API error: ${response.status} ${response.statusText}`, errorData);
+        return res.status(response.status).json({ 
+          error: `API error: ${response.status} ${response.statusText}`,
+          details: errorData
+        });
+      }
+      
+      const data = await response.json();
+      console.log(`Total request completed in ${Date.now() - startTime}ms`);
+      res.json(data);
+    } catch (fetchError) {
+      clearTimeout(timeoutId);
+      if (fetchError.name === 'AbortError') {
+        console.error('API request timed out after 20 seconds');
+        return res.status(504).json({ error: 'API request timed out' });
+      }
+      throw fetchError;
+    }
+  } catch (error) {
+    console.error('Error in /chat endpoint:', error);
+    res.status(500).json({ error: 'Internal server error: ' + error.message });
+  }
+});
+
 app.listen(port, () => {
     console.log(`Server running at http://localhost:${port}`);
     console.log('Environment variables loaded:', {
-        hasEndpoint: !!process.env.DEEPSEEK_API_ENDPOINT,
-        hasKey: !!process.env.DEEPSEEK_API_KEY,
-        endpoint: process.env.DEEPSEEK_API_ENDPOINT,
-        ocrMethod: process.env.OCR_METHOD || 'local'
+        llmModel: config.llmModel,
+        apiEndpoint: config.apiEndpoint,
+        hasKey: !!config.apiKey,
+        ocrMethod: process.env.OCR_METHOD || 'local',
+        siliconflowModel: config.siliconflowModel || 'N/A'
     });
 }); 

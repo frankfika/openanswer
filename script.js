@@ -16,6 +16,9 @@ let currentAnswer = '';
 let frameCount = 0;
 let currentQuestion = '';
 
+// 添加问题缓存，避免重复请求
+const questionCache = new Map();
+
 // 更新状态显示
 function updateStatus(status, isError = false) {
     console.log(`[状态更新] ${status}`);
@@ -763,28 +766,51 @@ async function recognizeTextBaidu(base64Image) {
     }
 }
 
-// 调用 DeepSeek API
-async function callDeepSeekAPI(text) {
-    if (!window.API_CONFIG?.deepseek?.apiKey) {
-        throw new Error('DeepSeek API 配置未找到或不完整');
+// 重命名函数以反映它现在支持多个LLM
+async function callLLMAPI(text) {
+    if (!window.API_CONFIG?.hasKey || !window.API_CONFIG?.endpoint) {
+        throw new Error('LLM API 配置未找到或不完整');
     }
 
     try {
-        console.log('调用 DeepSeek API...', {
+        // 获取模型名称用于显示
+        const llmModel = window.API_CONFIG.llmModel || 'deepseek';
+        let modelDisplayName = llmModel === 'siliconflow' ? 'SiliconFlow' : 'DeepSeek';
+        
+        // 如果是SiliconFlow，显示具体的模型名称
+        if (llmModel === 'siliconflow' && window.API_CONFIG.siliconflowModel) {
+            // 提取更友好的模型名称
+            const modelParts = window.API_CONFIG.siliconflowModel.split('/');
+            if (modelParts.length > 0) {
+                const lastPart = modelParts[modelParts.length - 1];
+                modelDisplayName = `${modelDisplayName}: ${lastPart}`;
+            }
+        }
+        
+        updateStatus(`🤖 正在使用 ${modelDisplayName} 生成回答...`);
+        
+        console.log('调用 LLM API...', {
+            model: window.API_CONFIG.llmModel,
             text: text.substring(0, 100) + (text.length > 100 ? '...' : '')
         });
         
-        const endpoint = window.API_CONFIG.deepseek.endpoint || 'https://api.deepseek.com/v1/chat/completions';
+        const endpoint = window.API_CONFIG.endpoint;
         console.log('发送请求到:', endpoint);
         
         // 优化提示词，让回答更简洁，并确保中文处理正确
-        const systemPrompt = "你是一个帮助回答问题的助手。请仔细阅读问题并给出准确、简洁的答案。避免不必要的解释和冗长的回复。直接回答问题的核心内容。如果问题是中文，请用中文回答；如果问题是英文，请用英文回答。";
+        const systemPrompt = "你是专业解题助手。请用中文回答，格式必须是：【答案】选项/结果 + 简短解释。不要犹豫，必须给出明确答案。如果是选择题，直接给出正确选项；如果是问答题，给出简洁明确的答案。不要说'我认为'或'可能'等模糊表达。英文问题用英文回答，格式为：【Answer】option/result + brief explanation。";
         
         // 检查文本是否包含中文
         const containsChinese = /[\u4e00-\u9fa5]/.test(text);
         
+        // 根据不同的LLM模型设置不同的请求体
+        let model = "deepseek-chat";
+        if (window.API_CONFIG.llmModel === 'siliconflow') {
+            model = window.API_CONFIG.siliconflowModel || "Pro/deepseek-ai/DeepSeek-R1";
+        }
+        
         const requestBody = {
-            model: "deepseek-chat",
+            model: model,
             messages: [
                 {
                     role: "system",
@@ -797,10 +823,13 @@ async function callDeepSeekAPI(text) {
             ],
             temperature: 0.5,  // 降低温度，使回答更确定
             max_tokens: 800,
-            stream: false,
-            // 如果包含中文，设置响应格式为中文
-            response_format: containsChinese ? { type: "text" } : undefined
+            stream: false
         };
+        
+        // 只有DeepSeek模型支持response_format
+        if (window.API_CONFIG.llmModel === 'deepseek' && containsChinese) {
+            requestBody.response_format = { type: "text" };
+        }
         
         console.log('请求体:', JSON.stringify({
             ...requestBody,
@@ -812,19 +841,24 @@ async function callDeepSeekAPI(text) {
         
         // 只尝试一次，减少重复调用
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 25000); // 25秒超时
+        const timeoutId = setTimeout(() => controller.abort(), 20000); // 20秒超时
         
         try {
-            const response = await fetch(endpoint, {
+            const startTime = Date.now();
+            updateStatus(`🔄 正在等待 ${modelDisplayName} 响应...`);
+            
+            const response = await fetch('/chat', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${window.API_CONFIG.deepseek.apiKey}`,
                     'Accept': 'application/json'
                 },
-                body: JSON.stringify(requestBody),
+                body: JSON.stringify({ messages: requestBody.messages }),
                 signal: controller.signal
             }).finally(() => clearTimeout(timeoutId));
+            
+            const endTime = Date.now();
+            console.log(`API响应时间: ${endTime - startTime}ms`);
             
             console.log('API响应状态:', response.status);
             const responseText = await response.text();
@@ -858,14 +892,14 @@ async function callDeepSeekAPI(text) {
             }
             
             const answer = data.choices[0].message.content;
-            console.log('✅ DeepSeek响应成功:', answer.substring(0, 100) + (answer.length > 100 ? '...' : ''));
+            console.log(`✅ ${modelDisplayName} 响应成功:`, answer.substring(0, 100) + (answer.length > 100 ? '...' : ''));
             return answer;
         } catch (err) {
-            console.error('❌ DeepSeek API请求失败:', err);
+            console.error(`❌ ${modelDisplayName} API请求失败:`, err);
             throw err;
         }
     } catch (err) {
-        console.error('❌ DeepSeek API错误:', err);
+        console.error('❌ LLM API错误:', err);
         throw err;
     }
 }
@@ -880,8 +914,8 @@ async function processFrame(currentTime) {
         return;
     }
 
-    // 增加处理间隔到4秒，减少频繁处理
-    if (currentTime - lastProcessTime < 4000) {
+    // 增加处理间隔到5秒，减少频繁处理
+    if (currentTime - lastProcessTime < 5000) {
         requestAnimationFrame(processFrame);
         return;
     }
@@ -945,8 +979,8 @@ async function processFrame(currentTime) {
             }
             window.forceUpdateCounter++;
             
-            // 每20次检查强制更新一次，减少不必要的API调用
-            const shouldForceUpdate = window.forceUpdateCounter >= 20;
+            // 每30次检查强制更新一次，减少不必要的API调用
+            const shouldForceUpdate = window.forceUpdateCounter >= 30;
             
             if (isNewText || shouldForceUpdate) {
                 if (shouldForceUpdate) {
@@ -973,44 +1007,55 @@ async function processFrame(currentTime) {
                 lastRecognizedText = recognizedText;
                 
                 try {
-                    updateStatus('🤖 正在获取回答...');
-                    console.time('AI回答');
-                    
-                    // 添加30秒超时
-                    const answer = await Promise.race([
-                        callDeepSeekAPI(recognizedText),
-                        new Promise((_, reject) => 
-                            setTimeout(() => reject(new Error('获取回答超时(30秒)')), 30000)
-                        )
-                    ]);
-                    
-                    console.timeEnd('AI回答');
-                    
-                    if (answer) {
-                        console.log('收到回答:', answer);
-                        
-                        // 更新状态和答案
-                        updateStatus('✅ 已获取回答');
-                        updateAnswer(answer);
-                        
-                        // 双重检查 - 确保答案显示
-                        setTimeout(() => {
-                            console.log('检查答案是否显示...');
-                            const answerElement = document.getElementById('answer-content');
-                            if (answerElement) {
-                                if (answerElement.innerHTML !== answer && answerElement.textContent !== answer) {
-                                    console.warn('答案未正确显示，尝试再次更新');
-                                    answerElement.innerHTML = answer;
-                                    console.log('已强制更新答案');
-                                } else {
-                                    console.log('答案已正确显示');
-                                }
-                            } else {
-                                console.error('找不到 answer-content 元素');
-                            }
-                        }, 500);
+                    // 检查缓存中是否已有答案
+                    if (questionCache.has(recognizedText)) {
+                        const cachedAnswer = questionCache.get(recognizedText);
+                        console.log('🔄 使用缓存的回答');
+                        updateStatus('✅ 已获取回答 (缓存)');
+                        updateAnswer(cachedAnswer);
                     } else {
-                        throw new Error('收到空回答');
+                        updateStatus('🤖 正在获取回答...');
+                        console.time('AI回答');
+                        
+                        // 添加20秒超时
+                        const answer = await Promise.race([
+                            callLLMAPI(recognizedText),
+                            new Promise((_, reject) => 
+                                setTimeout(() => reject(new Error('获取回答超时(20秒)')), 20000)
+                            )
+                        ]);
+                        
+                        console.timeEnd('AI回答');
+                        
+                        if (answer) {
+                            console.log('收到回答:', answer);
+                            
+                            // 缓存答案
+                            questionCache.set(recognizedText, answer);
+                            
+                            // 更新状态和答案
+                            updateStatus('✅ 已获取回答');
+                            updateAnswer(answer);
+                            
+                            // 双重检查 - 确保答案显示
+                            setTimeout(() => {
+                                console.log('检查答案是否显示...');
+                                const answerElement = document.getElementById('answer-content');
+                                if (answerElement) {
+                                    if (answerElement.innerHTML !== answer && answerElement.textContent !== answer) {
+                                        console.warn('答案未正确显示，尝试再次更新');
+                                        answerElement.innerHTML = answer;
+                                        console.log('已强制更新答案');
+                                    } else {
+                                        console.log('答案已正确显示');
+                                    }
+                                } else {
+                                    console.error('找不到 answer-content 元素');
+                                }
+                            }, 500);
+                        } else {
+                            throw new Error('收到空回答');
+                        }
                     }
                 } catch (err) {
                     console.error('❌ AI回答错误:', err);
@@ -1135,29 +1180,53 @@ async function init() {
             }
         }
         
-        // 显示OCR模式
-        const ocrModeElement = document.getElementById('ocr-mode');
-        if (ocrModeElement) {
+        // 更新LLM模型信息
+        const llmBadge = document.getElementById('llm-badge');
+        if (llmBadge) {
+            const llmModel = window.API_CONFIG.llmModel || 'deepseek';
+            let modelName = llmModel === 'siliconflow' ? 'SiliconFlow' : 'DeepSeek';
+            
+            // 如果是SiliconFlow，显示具体的模型名称
+            if (llmModel === 'siliconflow' && window.API_CONFIG.siliconflowModel) {
+                const modelParts = window.API_CONFIG.siliconflowModel.split('/');
+                if (modelParts.length > 0) {
+                    const lastPart = modelParts[modelParts.length - 1];
+                    modelName = `${modelName}: ${lastPart}`;
+                }
+            }
+            
+            llmBadge.textContent = `LLM: ${modelName}`;
+            llmBadge.title = `完整模型: ${window.API_CONFIG.siliconflowModel || 'deepseek-chat'}`;
+            console.log(`使用LLM模型: ${modelName} (${window.API_CONFIG.siliconflowModel || 'deepseek-chat'})`);
+        }
+        
+        // 更新OCR模式
+        const ocrBadge = document.getElementById('ocr-badge');
+        if (ocrBadge) {
             const ocrMethod = window.API_CONFIG.ocrMethod || 'local';
-            ocrModeElement.textContent = ocrMethod === 'local' ? '本地识别' : '百度云识别';
+            ocrBadge.textContent = `OCR: ${ocrMethod === 'local' ? '本地识别' : '百度云识别'}`;
+            console.log(`使用OCR模式: ${ocrMethod === 'local' ? '本地识别' : '百度云识别'}`);
         }
         
         // 检查配置
         const checkConfig = () => {
-            // 检查DeepSeek API配置
-            if (!window.API_CONFIG?.deepseek?.apiKey) {
-                updateStatus('❌ DeepSeek API密钥未配置，请检查.env文件', true);
-                return false;
+            // 检查LLM API配置
+            if (window.API_CONFIG.llmModel === 'siliconflow') {
+                if (!window.API_CONFIG.hasKey || !window.API_CONFIG.hasEndpoint) {
+                    updateStatus('❌ SiliconFlow API密钥未配置，请检查.env文件', true);
+                    return false;
+                }
+            } else {
+                if (!window.API_CONFIG.hasKey || !window.API_CONFIG.hasEndpoint) {
+                    updateStatus('❌ DeepSeek API密钥未配置，请检查.env文件', true);
+                    return false;
+                }
             }
             
             // 检查OCR配置
             const ocrMethod = window.API_CONFIG.ocrMethod || 'local';
-            if (ocrMethod === 'baidu' && !window.API_CONFIG?.baidu?.accessToken) {
-                if (window.API_CONFIG?.baidu?.error) {
-                    updateStatus(`⚠️ 百度OCR配置错误: ${window.API_CONFIG.baidu.error}，将使用本地OCR`, true);
-                } else {
-                    updateStatus('⚠️ 百度OCR未正确配置，将使用本地OCR', true);
-                }
+            if (ocrMethod === 'baidu' && !window.API_CONFIG.hasBaiduKey) {
+                updateStatus('⚠️ 百度OCR未正确配置，将使用本地OCR', true);
             }
             
             return true;

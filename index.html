@@ -33,6 +33,34 @@
             background-color: #0d6efd;
             transition: width 0.3s ease;
         }
+        
+        /* 配置信息样式 */
+        .config-info {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        
+        .config-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            background-color: #e9ecef;
+            color: #495057;
+        }
+        
+        .config-badge.llm {
+            background-color: #cfe2ff;
+            color: #0d6efd;
+        }
+        
+        .config-badge.ocr {
+            background-color: #d1e7dd;
+            color: #198754;
+        }
     </style>
 </head>
 <body>
@@ -52,8 +80,9 @@
                 <div class="progress-container" id="progress-container">
                     <div class="progress-bar" id="progress-bar"></div>
                 </div>
-                <div class="ocr-info">
-                    <p>OCR模式: <span id="ocr-mode">加载中...</span></p>
+                <div class="config-info">
+                    <div class="config-badge llm" id="llm-badge">LLM: 加载中...</div>
+                    <div class="config-badge ocr" id="ocr-badge">OCR: 加载中...</div>
                 </div>
             </div>
             <div id="question" class="question">
@@ -81,11 +110,31 @@
                 }
                 window.API_CONFIG = await response.json();
                 
+                // 显示LLM模型信息
+                const llmBadge = document.getElementById('llm-badge');
+                if (llmBadge) {
+                    const llmModel = window.API_CONFIG.llmModel || 'deepseek';
+                    let modelName = llmModel === 'siliconflow' ? 'SiliconFlow' : 'DeepSeek';
+                    
+                    // 如果是SiliconFlow，显示具体的模型名称
+                    if (llmModel === 'siliconflow' && window.API_CONFIG.siliconflowModel) {
+                        // 提取更友好的模型名称
+                        const modelParts = window.API_CONFIG.siliconflowModel.split('/');
+                        if (modelParts.length > 0) {
+                            const lastPart = modelParts[modelParts.length - 1];
+                            modelName = `${modelName}: ${lastPart}`;
+                        }
+                    }
+                    
+                    llmBadge.textContent = `LLM: ${modelName}`;
+                    llmBadge.title = `完整模型: ${window.API_CONFIG.siliconflowModel || 'deepseek-chat'}`;
+                }
+                
                 // 显示OCR模式
-                const ocrModeElement = document.getElementById('ocr-mode');
-                if (ocrModeElement) {
+                const ocrBadge = document.getElementById('ocr-badge');
+                if (ocrBadge) {
                     const ocrMethod = window.API_CONFIG.ocrMethod || 'local';
-                    ocrModeElement.textContent = ocrMethod === 'local' ? '本地识别' : '百度云识别';
+                    ocrBadge.textContent = `OCR: ${ocrMethod === 'local' ? '本地识别' : '百度云识别'}`;
                 }
                 
                 // 加载主应用脚本
