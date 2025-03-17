@@ -1,5 +1,10 @@
 import { LLMServiceFactory } from './services/llm.js';
 import { OCRServiceFactory } from './services/ocr.js';
+import { UIManager } from './ui.js';
+import TextProcessor from './text-processor.js';
+import { OCRService } from './services/ocr.js';
+import { LLMService } from './services/llm.js';
+import { ConfigManager } from './config.js';
 
 // 核心接口定义
 class ILogger {
@@ -43,270 +48,15 @@ class ConsoleLogger extends ILogger {
     debug(message, ...args) { this.log('debug', message, ...args); }
 }
 
-class ConfigManager extends IConfigManager {
-    constructor(config) {
-        super();
-        this.config = config;
-        this.logger = new ConsoleLogger(config.DEBUG);
-    }
-
-    get(key) {
-        return this.config[key];
-    }
-
-    validate() {
-        const { LLM_MODEL, OCR_METHOD } = this.config;
-        
-        if (!LLM_MODEL) {
-            throw new Error('LLM_MODEL 未配置');
-        }
-
-        if (LLM_MODEL === 'siliconflow' && !this.config.SILICONFLOW_API_KEY) {
-            throw new Error('SiliconFlow API Key 未配置');
-        }
-
-        if (LLM_MODEL === 'deepseek' && !this.config.DEEPSEEK_API_KEY) {
-            throw new Error('DeepSeek API Key 未配置');
-        }
-
-        if (OCR_METHOD === 'baidu' && 
-            (!this.config.BAIDU_OCR_APP_ID || 
-             !this.config.BAIDU_OCR_API_KEY || 
-             !this.config.BAIDU_OCR_SECRET_KEY)) {
-            throw new Error('百度 OCR 配置不完整');
-        }
-
-        return true;
-    }
-
-    getLLMConfig() {
-        const { LLM_MODEL, SILICONFLOW_API_KEY, SILICONFLOW_API_ENDPOINT, 
-                SILICONFLOW_MODEL, DEEPSEEK_API_KEY, DEEPSEEK_API_ENDPOINT,
-                DEEPSEEK_MODEL } = this.config;
-
-        if (LLM_MODEL === 'siliconflow') {
-            return {
-                model: 'siliconflow',
-                apiKey: SILICONFLOW_API_KEY,
-                endpoint: SILICONFLOW_API_ENDPOINT,
-                specificModel: SILICONFLOW_MODEL
-            };
-        } else if (LLM_MODEL === 'deepseek') {
-            return {
-                model: 'deepseek',
-                apiKey: DEEPSEEK_API_KEY,
-                endpoint: DEEPSEEK_API_ENDPOINT,
-                specificModel: DEEPSEEK_MODEL || 'deepseek-chat'
-            };
-        } else {
-            throw new Error(`不支持的 LLM 模型: ${LLM_MODEL}`);
-        }
-    }
-
-    getOCRConfig() {
-        const { OCR_METHOD, BAIDU_OCR_APP_ID, BAIDU_OCR_API_KEY, 
-                BAIDU_OCR_SECRET_KEY, OCR_INTERVAL, IMAGE_QUALITY, MAX_IMAGE_SIZE } = this.config;
-
-        return {
-            method: OCR_METHOD,
-            interval: OCR_INTERVAL || 5000,
-            imageQuality: IMAGE_QUALITY || 0.8,
-            maxImageSize: MAX_IMAGE_SIZE || 1600,
-            baidu: OCR_METHOD === 'baidu' ? {
-                appId: BAIDU_OCR_APP_ID,
-                apiKey: BAIDU_OCR_API_KEY,
-                secretKey: BAIDU_OCR_SECRET_KEY
-            } : null
-        };
-    }
-}
-
-class UIManager extends IUIManager {
-    constructor(logger) {
-        super();
-        this.logger = logger;
-        this.elements = {
-            video: document.getElementById('video'),
-            canvas: document.getElementById('canvas'),
-            answerContent: document.getElementById('answer-content'),
-            statusContent: document.getElementById('status-content'),
-            questionContent: document.getElementById('question-content'),
-            progressContainer: document.getElementById('progress-container'),
-            progressBar: document.getElementById('progress-bar')
-        };
-
-        this.ctx = this.elements.canvas?.getContext('2d');
-    }
-
-    updateStatus(status, isError = false) {
-        this.logger.info(`[状态更新] ${status}`);
-        
-        if (!this.elements.statusContent) {
-            this.logger.error('找不到 status-content 元素');
-            return;
-        }
-        
-        this.elements.statusContent.textContent = status;
-        this.elements.statusContent.style.color = isError ? 'red' : '#333';
-        
-        if (status.includes('OCR识别:') || status.includes('简化OCR识别:')) {
-            this.showProgress();
-            const match = status.match(/(\d+)%/);
-            if (match && match[1]) {
-                this.updateProgress(parseInt(match[1]));
-            }
-        } else if (status.includes('正在进行') || status.includes('正在预处理') || status.includes('正在获取')) {
-            this.showProgress();
-            this.updateProgress(-1);
-        } else {
-            this.hideProgress();
-        }
-    }
-
-    showProgress() {
-        if (this.elements.progressContainer) {
-            this.elements.progressContainer.style.display = 'block';
-        }
-    }
-
-    hideProgress() {
-        if (this.elements.progressContainer) {
-            this.elements.progressContainer.style.display = 'none';
-            if (this.elements.progressBar) {
-                this.elements.progressBar.style.width = '0%';
-                this.elements.progressBar.classList.remove('indeterminate');
-            }
-        }
-    }
-
-    updateProgress(percent) {
-        if (!this.elements.progressBar) return;
-        
-        if (percent < 0) {
-            this.elements.progressBar.style.width = '100%';
-            this.elements.progressBar.classList.add('indeterminate');
-        } else {
-            this.elements.progressBar.classList.remove('indeterminate');
-            this.elements.progressBar.style.width = `${percent}%`;
-        }
-    }
-
-    updateQuestion(question) {
-        this.logger.info(`[问题更新] ${question.substring(0, 50)}${question.length > 50 ? '...' : ''}`);
-        
-        if (!this.elements.questionContent) {
-            this.logger.error('找不到 question-content 元素');
-            return;
-        }
-        
-        this.elements.questionContent.textContent = question;
-        this.elements.questionContent.style.fontFamily = "'PingFang SC', 'Microsoft YaHei', 'Hiragino Sans GB', 'Heiti SC', sans-serif";
-        
-        setTimeout(() => {
-            this.elements.questionContent.classList.add('highlight');
-            setTimeout(() => {
-                this.elements.questionContent.classList.remove('highlight');
-            }, 500);
-        }, 100);
-    }
-
-    updateAnswer(answer, isError = false) {
-        this.logger.info(`[答案更新] ${answer.substring(0, 50)}${answer.length > 50 ? '...' : ''}`);
-        
-        if (!this.elements.answerContent) {
-            this.logger.error('找不到 answer-content 元素');
-            return;
-        }
-        
-        try {
-            this.elements.answerContent.innerHTML = answer;
-        } catch (e) {
-            this.logger.error('更新答案失败:', e);
-            this.elements.answerContent.textContent = answer;
-        }
-        
-        this.elements.answerContent.style.color = isError ? 'red' : '#333';
-    }
-}
-
-// 文本处理工具类
-class TextProcessor {
-    static similarity(a, b) {
-        if (!a || !b) return 0;
-        
-        const cleanText = (text) => {
-            return text.toLowerCase()
-                .replace(/[.,!?，。！？\s]+/g, ' ')
-                .trim();
-        };
-        
-        const cleanA = cleanText(a);
-        const cleanB = cleanText(b);
-        
-        if (cleanA === cleanB) return 1;
-        
-        const levenshteinDistance = (str1, str2) => {
-            const m = str1.length;
-            const n = str2.length;
-            const dp = Array(m + 1).fill().map(() => Array(n + 1).fill(0));
-            
-            for (let i = 0; i <= m; i++) dp[i][0] = i;
-            for (let j = 0; j <= n; j++) dp[0][j] = j;
-            
-            for (let i = 1; i <= m; i++) {
-                for (let j = 1; j <= n; j++) {
-                    if (str1[i - 1] === str2[j - 1]) {
-                        dp[i][j] = dp[i - 1][j - 1];
-                    } else {
-                        dp[i][j] = Math.min(
-                            dp[i - 1][j - 1] + 1,
-                            dp[i - 1][j] + 1,
-                            dp[i][j - 1] + 1
-                        );
-                    }
-                }
-            }
-            
-            return dp[m][n];
-        };
-        
-        const maxLength = Math.max(cleanA.length, cleanB.length);
-        if (maxLength === 0) return 1;
-        
-        const distance = levenshteinDistance(cleanA, cleanB);
-        const editSimilarity = 1 - (distance / maxLength);
-        
-        const wordsA = cleanA.split(' ').filter(w => w.length > 0);
-        const wordsB = cleanB.split(' ').filter(w => w.length > 0);
-        
-        const commonWords = wordsA.filter(word => wordsB.includes(word));
-        const wordSimilarity = wordsA.length && wordsB.length ? 
-            (2.0 * commonWords.length) / (wordsA.length + wordsB.length) : 0;
-        
-        const similarity = (editSimilarity * 0.7) + (wordSimilarity * 0.3);
-        
-        if (window.DEBUG) {
-            console.log('📊 文本相似度详情:', {
-                text1: cleanA,
-                text2: cleanB,
-                editDistance: distance,
-                editSimilarity: editSimilarity.toFixed(3),
-                commonWords,
-                wordSimilarity: wordSimilarity.toFixed(3),
-                finalSimilarity: similarity.toFixed(3)
-            });
-        }
-        
-        return similarity;
-    }
-}
-
 // 应用核心类
 class Application {
     constructor(config) {
         this.logger = new ConsoleLogger(config.DEBUG);
         this.config = new ConfigManager(config);
         this.ui = new UIManager(this.logger);
+        this.textProcessor = new TextProcessor();
+        this.ocrService = new OCRService(this.logger);
+        this.llmService = new LLMService(this.logger);
         
         this.state = {
             lastProcessTime: 0,
@@ -334,11 +84,18 @@ class Application {
         try {
             this.ui.updateStatus('🎥 请选择要共享的窗口...');
             const stream = await navigator.mediaDevices.getDisplayMedia({ 
-                video: { cursor: "always" },
+                video: { 
+                    cursor: "always",
+                    displaySurface: "window" // 优先选择窗口而不是整个屏幕
+                },
                 audio: false
             });
             
             this.ui.elements.video.srcObject = stream;
+            
+            // 调整视频元素样式
+            this.ui.elements.video.style.maxHeight = '70vh';
+            this.ui.elements.video.style.objectFit = 'contain';
             
             this.ui.elements.video.onloadedmetadata = () => {
                 this.logger.info('📺 视频流已就绪，开始处理...');
@@ -388,7 +145,7 @@ class Application {
         this.state.lastProcessTime = currentTime;
 
         try {
-            this.logger.debug(`🎞️ 处理第 ${this.state.frameCount} 帧`);
+            this.logger.info(`🎞️ 处理第 ${this.state.frameCount} 帧`);
             console.time('帧处理');
             
             await this.processVideoFrame();
@@ -436,7 +193,7 @@ class Application {
         if (isNewText) {
             await this.handleNewText(recognizedText);
         } else {
-            this.logger.debug('⏭️ 文本相似，跳过处理');
+            this.logger.info('⏭️ 文本相似，跳过处理');
             this.ui.updateStatus('✅ 文本未变化，等待新问题...');
         }
     }
@@ -474,17 +231,61 @@ class Application {
 // 初始化应用
 async function init() {
     try {
-        const response = await fetch('/config');
-        if (!response.ok) {
-            throw new Error('配置加载失败');
+        // 尝试从服务器获取配置
+        let config;
+        try {
+            const response = await fetch('/config');
+            if (response.ok) {
+                config = await response.json();
+                console.log('从服务器加载配置成功:', config);
+            } else {
+                throw new Error('无法从服务器获取配置');
+            }
+        } catch (err) {
+            console.warn('无法从服务器获取配置，使用默认配置:', err);
+            // 使用硬编码的配置作为备份
+            config = {
+                LLM_MODEL: 'siliconflow',
+                OCR_METHOD: 'local',  // 确保使用本地OCR
+                OCR_INTERVAL: 5000,
+                IMAGE_QUALITY: 0.8,
+                MAX_IMAGE_SIZE: 1600,
+                DEBUG: false,
+                SILICONFLOW_API_KEY: 'sk-xslmjbepeyaybceopnrnndvgpicchzmldfsszminyjubkdnk',
+                SILICONFLOW_API_ENDPOINT: 'https://api.siliconflow.cn/v1/chat/completions',
+                SILICONFLOW_MODEL: 'internlm/internlm2_5-20b-chat',
+                DEEPSEEK_API_KEY: 'sk-f8614f81212040d8bba9205c2022eee2',
+                DEEPSEEK_API_ENDPOINT: 'https://api.deepseek.com/v1/chat/completions',
+                DEEPSEEK_MODEL: 'deepseek-reasoner',
+                // 添加空的百度OCR配置，但不强制验证
+                BAIDU_OCR_APP_ID: '',
+                BAIDU_OCR_API_KEY: '',
+                BAIDU_OCR_SECRET_KEY: '',
+                FORCE_VALIDATE_BAIDU: false
+            };
         }
-        const config = await response.json();
+        
+        // 添加全局状态更新函数
+        window.updateStatus = function(status) {
+            const statusEl = document.getElementById('status-content');
+            if (statusEl) {
+                statusEl.textContent = status;
+            }
+        };
+        
+        // 打印配置信息
+        console.log('应用配置:', {
+            LLM_MODEL: config.LLM_MODEL,
+            OCR_METHOD: config.OCR_METHOD,
+            SILICONFLOW_API_KEY: config.SILICONFLOW_API_KEY ? '已设置' : '未设置',
+            DEEPSEEK_API_KEY: config.DEEPSEEK_API_KEY ? '已设置' : '未设置'
+        });
         
         const app = new Application(config);
         app.start();
     } catch (error) {
-        console.error('Error loading config:', error);
-        document.getElementById('status-content').textContent = '错误：无法加载 API 配置';
+        console.error('初始化错误:', error);
+        document.getElementById('status-content').textContent = '错误：应用初始化失败 - ' + error.message;
     }
 }
 

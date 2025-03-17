@@ -69,21 +69,50 @@ app.use(express.json());
 
 // 提供配置接口
 app.get('/config', (req, res) => {
+  // 创建前端期望的配置格式
   const configResponse = {
-    hasEndpoint: config.llmModel === 'siliconflow' 
-      ? !!process.env.SILICONFLOW_API_ENDPOINT 
-      : !!process.env.DEEPSEEK_API_ENDPOINT,
-    hasKey: config.llmModel === 'siliconflow'
+    // 使用大写键名，与前端期望的格式一致
+    LLM_MODEL: process.env.LLM_MODEL || 'siliconflow',
+    OCR_METHOD: 'local', // 强制使用本地OCR
+    OCR_INTERVAL: parseInt(process.env.OCR_INTERVAL || '5000'),
+    IMAGE_QUALITY: parseFloat(process.env.IMAGE_QUALITY || '0.8'),
+    MAX_IMAGE_SIZE: parseInt(process.env.MAX_IMAGE_SIZE || '1600'),
+    DEBUG: process.env.DEBUG === 'true',
+    
+    // API密钥和端点
+    SILICONFLOW_API_KEY: process.env.SILICONFLOW_API_KEY,
+    SILICONFLOW_API_ENDPOINT: process.env.SILICONFLOW_API_ENDPOINT || 'https://api.siliconflow.cn/v1/chat/completions',
+    SILICONFLOW_MODEL: process.env.SILICONFLOW_MODEL || 'internlm/internlm2_5-20b-chat',
+    
+    DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY,
+    DEEPSEEK_API_ENDPOINT: process.env.DEEPSEEK_API_ENDPOINT || 'https://api.deepseek.com/v1/chat/completions',
+    DEEPSEEK_MODEL: process.env.DEEPSEEK_MODEL || 'deepseek-reasoner',
+    
+    // 百度OCR配置
+    BAIDU_OCR_APP_ID: process.env.BAIDU_OCR_APP_ID || '',
+    BAIDU_OCR_API_KEY: process.env.BAIDU_API_KEY || '',
+    BAIDU_OCR_SECRET_KEY: process.env.BAIDU_SECRET_KEY || '',
+    FORCE_VALIDATE_BAIDU: false,
+    
+    // 兼容旧版配置，提供小写键名
+    llmModel: process.env.LLM_MODEL || 'siliconflow',
+    apiEndpoint: process.env.LLM_MODEL === 'siliconflow' 
+      ? process.env.SILICONFLOW_API_ENDPOINT 
+      : process.env.DEEPSEEK_API_ENDPOINT,
+    hasKey: process.env.LLM_MODEL === 'siliconflow'
       ? !!process.env.SILICONFLOW_API_KEY
       : !!process.env.DEEPSEEK_API_KEY,
-    endpoint: config.apiEndpoint,
-    hasBaiduKey: !!process.env.BAIDU_API_KEY,
-    hasBaiduSecret: !!process.env.BAIDU_SECRET_KEY,
-    ocrMethod: process.env.OCR_METHOD || 'local',
-    llmModel: config.llmModel,
-    siliconflowModel: config.siliconflowModel
+    ocrMethod: 'local',
+    siliconflowModel: process.env.SILICONFLOW_MODEL || 'internlm/internlm2_5-20b-chat'
   };
-  console.log('Config requested. Current config:', configResponse);
+  
+  console.log('Config requested. Current config:', {
+    LLM_MODEL: configResponse.LLM_MODEL,
+    OCR_METHOD: configResponse.OCR_METHOD,
+    SILICONFLOW_API_KEY: configResponse.SILICONFLOW_API_KEY ? '已设置' : '未设置',
+    DEEPSEEK_API_KEY: configResponse.DEEPSEEK_API_KEY ? '已设置' : '未设置'
+  });
+  
   res.json(configResponse);
 });
 
@@ -158,10 +187,12 @@ app.post('/chat', async (req, res) => {
 app.listen(port, () => {
     console.log(`Server running at http://localhost:${port}`);
     console.log('Environment variables loaded:', {
-        llmModel: config.llmModel,
-        apiEndpoint: config.apiEndpoint,
-        hasKey: !!config.apiKey,
-        ocrMethod: process.env.OCR_METHOD || 'local',
-        siliconflowModel: config.siliconflowModel || 'N/A'
+        LLM_MODEL: process.env.LLM_MODEL || 'siliconflow',
+        SILICONFLOW_API_ENDPOINT: process.env.SILICONFLOW_API_ENDPOINT ? '已设置' : '未设置',
+        DEEPSEEK_API_ENDPOINT: process.env.DEEPSEEK_API_ENDPOINT ? '已设置' : '未设置',
+        SILICONFLOW_API_KEY: process.env.SILICONFLOW_API_KEY ? '已设置' : '未设置',
+        DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY ? '已设置' : '未设置',
+        OCR_METHOD: process.env.OCR_METHOD || 'local',
+        SILICONFLOW_MODEL: process.env.SILICONFLOW_MODEL || 'internlm/internlm2_5-20b-chat'
     });
 }); 

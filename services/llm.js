@@ -129,4 +129,39 @@ class LLMServiceFactory {
     }
 }
 
-export { LLMServiceFactory }; 
+// 简化版LLM服务
+class LLMService {
+    constructor(logger) {
+        this.service = null;
+        this.logger = logger || {
+            info: console.log,
+            error: console.error,
+            warn: console.warn,
+            debug: console.log  // 添加兼容性的debug方法
+        };
+    }
+    
+    async getAnswer(text) {
+        if (!this.service) {
+            // 创建一个SiliconFlow服务实例
+            this.service = new SiliconFlowService({
+                SILICONFLOW_API_KEY: 'sk-xslmjbepeyaybceopnrnndvgpicchzmldfsszminyjubkdnk',
+                SILICONFLOW_API_ENDPOINT: 'https://api.siliconflow.cn/v1/chat/completions',
+                SILICONFLOW_MODEL: 'internlm/internlm2_5-20b-chat'
+            });
+        }
+        
+        try {
+            return await this.service.getAnswer(text);
+        } catch (error) {
+            // 如果失败，返回一个默认回答
+            this.logger.error('LLM服务错误:', error);
+            
+            return `【答案】无法连接到语言模型服务。请检查网络连接和API配置。
+
+错误信息: ${error.message || '未知错误'}`;
+        }
+    }
+}
+
+export { LLMServiceFactory, LLMService }; 

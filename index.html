@@ -4,149 +4,328 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-    <title>OpenAnswer</title>
-    <link rel="stylesheet" href="style.css">
+    <title>OpenAnswer - 智能解题助手</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@mdi/font@6.5.95/css/materialdesignicons.min.css">
     <style>
-        @font-face {
-            font-family: 'Chinese Font';
-            src: local('PingFang SC'), local('Microsoft YaHei'), local('Hiragino Sans GB'), local('Heiti SC');
-            font-weight: normal;
-            font-style: normal;
+        :root {
+            --primary-color: #4f46e5;
+            --primary-hover: #4338ca;
+            --success-color: #10b981;
+            --error-color: #ef4444;
+            --warning-color: #f59e0b;
+            --text-primary: #1f2937;
+            --text-secondary: #6b7280;
+            --bg-primary: #ffffff;
+            --bg-secondary: #f3f4f6;
+            --border-color: #e5e7eb;
         }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'PingFang SC', 'Microsoft YaHei', 'Hiragino Sans GB', 'Heiti SC', sans-serif;
+        }
+
         body {
-            font-family: 'Chinese Font', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            line-height: 1.5;
         }
-        
-        /* OCR进度指示器 */
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 1rem;
+        }
+
+        .header {
+            background: var(--bg-primary);
+            padding: 1rem;
+            border-radius: 1rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            margin-bottom: 1rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--primary-color);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .header h1 i {
+            font-size: 1.75rem;
+        }
+
+        .config-badges {
+            display: flex;
+            gap: 1rem;
+        }
+
+        .config-badge {
+            background: var(--bg-secondary);
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: all 0.2s;
+        }
+
+        .config-badge:hover {
+            background: var(--primary-color);
+            color: white;
+        }
+
+        .config-badge i {
+            font-size: 1.25rem;
+        }
+
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+
+        .video-container {
+            background: var(--bg-primary);
+            padding: 0.75rem;
+            border-radius: 1rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            position: relative;
+            top: -20px; /* 进一步上移视频容器 */
+            margin-bottom: -10px; /* 减少底部间距 */
+        }
+
+        .video-container h2 {
+            font-size: 1rem;
+            margin-bottom: 0.25rem;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        #video {
+            width: 100%;
+            border-radius: 0.5rem;
+            background: var(--bg-secondary);
+            max-height: 80vh; /* 限制视频高度 */
+            object-fit: contain; /* 保持视频比例 */
+            transform: translateY(-10px); /* 向上移动视频元素 */
+        }
+
+        .qa-container {
+            background: var(--bg-primary);
+            padding: 1rem;
+            border-radius: 1rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            position: relative;
+            top: -10px; /* 上移QA容器 */
+        }
+
+        .qa-section {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .qa-section h2 {
+            font-size: 1.1rem;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .qa-section h2 i {
+            color: var(--primary-color);
+        }
+
+        .qa-content {
+            flex: 1;
+            background: var(--bg-secondary);
+            padding: 1rem;
+            border-radius: 0.5rem;
+            min-height: 120px;
+            max-height: 250px;
+            overflow-y: auto;
+            font-size: 1rem;
+            line-height: 1.6;
+            color: var(--text-primary);
+            transition: all 0.3s;
+        }
+
+        .qa-content.highlight {
+            animation: highlight 1s ease-in-out;
+        }
+
+        @keyframes highlight {
+            0% { background: var(--bg-secondary); }
+            50% { background: rgba(79, 70, 229, 0.1); }
+            100% { background: var(--bg-secondary); }
+        }
+
+        .status-container {
+            background: var(--bg-primary);
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+            margin-top: 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            position: relative;
+            top: -10px; /* 上移状态容器 */
+        }
+
+        #status-content {
+            flex: 1;
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+        }
+
         .progress-container {
-            margin-top: 10px;
-            background-color: #f0f0f0;
-            border-radius: 4px;
-            height: 8px;
-            overflow: hidden;
             display: none;
+            background: var(--bg-secondary);
+            height: 4px;
+            border-radius: 2px;
+            overflow: hidden;
+            margin-top: 0.25rem;
         }
-        
+
         .progress-bar {
             height: 100%;
-            width: 0%;
-            background-color: #0d6efd;
+            width: 0;
+            background: var(--primary-color);
             transition: width 0.3s ease;
         }
-        
-        /* 配置信息样式 */
-        .config-info {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            margin-top: 10px;
+
+        .progress-bar.indeterminate {
+            animation: indeterminate 1.5s infinite;
         }
-        
-        .config-badge {
-            display: inline-flex;
-            align-items: center;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 12px;
-            background-color: #e9ecef;
-            color: #495057;
+
+        @keyframes indeterminate {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
         }
-        
-        .config-badge.llm {
-            background-color: #cfe2ff;
-            color: #0d6efd;
+
+        .debug-info {
+            position: fixed;
+            bottom: 1rem;
+            right: 1rem;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            font-size: 0.875rem;
+            display: none;
         }
-        
-        .config-badge.ocr {
-            background-color: #d1e7dd;
-            color: #198754;
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 0.5rem;
+            }
+            
+            .header {
+                padding: 0.75rem;
+                margin-bottom: 0.5rem;
+            }
+            
+            .main-content {
+                grid-template-columns: 1fr;
+                gap: 0.5rem;
+            }
+
+            .header {
+                flex-direction: column;
+                gap: 0.5rem;
+                text-align: center;
+            }
+
+            .config-badges {
+                flex-wrap: wrap;
+                justify-content: center;
+            }
+            
+            .video-container, .qa-container {
+                padding: 0.75rem;
+            }
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <div class="video-container">
-            <video id="video" autoplay playsinline></video>
-            <canvas id="canvas" style="display: none;"></canvas>
-            <div class="video-info">
-                <p>请选择要共享的窗口，确保窗口中有清晰的文字内容</p>
-                <p class="tips">提示：共享整个屏幕或应用窗口效果最佳，避免共享浏览器标签页</p>
+        <header class="header">
+            <h1>
+                <i class="mdi mdi-robot"></i>
+                OpenAnswer
+            </h1>
+            <div class="config-badges">
+                <div class="config-badge" id="llm-badge">
+                    <i class="mdi mdi-brain"></i>
+                    <span>LLM: SiliconFlow</span>
+                </div>
+                <div class="config-badge" id="ocr-badge">
+                    <i class="mdi mdi-text-recognition"></i>
+                    <span>OCR: 本地识别</span>
+                </div>
             </div>
-        </div>
-        <div class="qa-container">
-            <div id="status" class="status">
-                <h3>状态：</h3>
-                <p id="status-content">正在加载配置...</p>
+        </header>
+
+        <main class="main-content">
+            <div class="video-container">
+                <h2>
+                    <i class="mdi mdi-camera"></i>
+                    屏幕捕获
+                </h2>
+                <video id="video" autoplay muted playsinline></video>
+                <canvas id="canvas" style="display: none;"></canvas>
+            </div>
+
+            <div class="qa-container">
+                <div class="qa-section">
+                    <h2>
+                        <i class="mdi mdi-help-circle"></i>
+                        识别问题
+                    </h2>
+                    <div class="qa-content" id="question-content"></div>
+                </div>
+
+                <div class="qa-section">
+                    <h2>
+                        <i class="mdi mdi-lightbulb"></i>
+                        智能回答
+                    </h2>
+                    <div class="qa-content" id="answer-content"></div>
+                </div>
+
+                <div class="status-container">
+                    <i class="mdi mdi-information"></i>
+                    <div id="status-content">准备就绪</div>
+                </div>
+
                 <div class="progress-container" id="progress-container">
                     <div class="progress-bar" id="progress-bar"></div>
                 </div>
-                <div class="config-info">
-                    <div class="config-badge llm" id="llm-badge">LLM: 加载中...</div>
-                    <div class="config-badge ocr" id="ocr-badge">OCR: 加载中...</div>
-                </div>
             </div>
-            <div id="question" class="question">
-                <h3>识别的问题：</h3>
-                <p id="question-content"></p>
-            </div>
-            <div id="answer" class="answer">
-                <h3>AI 回答：</h3>
-                <p id="answer-content"></p>
-            </div>
-        </div>
+        </main>
     </div>
-    <footer>
-        <p>每 4 秒自动识别一次屏幕内容。如果答案未更新，请稍等片刻或调整窗口位置。</p>
-        <p class="help-text">如遇问题：1) 确保文字清晰可见 2) 尝试调整窗口大小 3) 检查网络连接</p>
-    </footer>
-    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.0.4/dist/tesseract.min.js"></script>
-    <script src="app.js"></script>
-    <script>
-        // 等待配置加载完成后再初始化应用
-        window.onload = async function() {
-            try {
-                const response = await fetch('/config');
-                if (!response.ok) {
-                    throw new Error('配置加载失败');
-                }
-                window.API_CONFIG = await response.json();
-                
-                // 显示LLM模型信息
-                const llmBadge = document.getElementById('llm-badge');
-                if (llmBadge) {
-                    const llmModel = window.API_CONFIG.llmModel || 'deepseek';
-                    let modelName = llmModel === 'siliconflow' ? 'SiliconFlow' : 'DeepSeek';
-                    
-                    // 如果是SiliconFlow，显示具体的模型名称
-                    if (llmModel === 'siliconflow' && window.API_CONFIG.siliconflowModel) {
-                        // 提取更友好的模型名称
-                        const modelParts = window.API_CONFIG.siliconflowModel.split('/');
-                        if (modelParts.length > 0) {
-                            const lastPart = modelParts[modelParts.length - 1];
-                            modelName = `${modelName}: ${lastPart}`;
-                        }
-                    }
-                    
-                    llmBadge.textContent = `LLM: ${modelName}`;
-                    llmBadge.title = `完整模型: ${window.API_CONFIG.siliconflowModel || 'deepseek-chat'}`;
-                }
-                
-                // 显示OCR模式
-                const ocrBadge = document.getElementById('ocr-badge');
-                if (ocrBadge) {
-                    const ocrMethod = window.API_CONFIG.ocrMethod || 'local';
-                    ocrBadge.textContent = `OCR: ${ocrMethod === 'local' ? '本地识别' : '百度云识别'}`;
-                }
-                
-                // 加载主应用脚本
-                const script = document.createElement('script');
-                script.src = 'script.js';
-                document.body.appendChild(script);
-            } catch (error) {
-                console.error('Error loading config:', error);
-                document.getElementById('status-content').textContent = '错误：无法加载 API 配置';
-            }
-        };
-    </script>
+
+    <div class="debug-info" id="debug-info"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.1.1/dist/tesseract.min.js"></script>
+    <script type="module" src="app.js"></script>
 </body>
 </html> 
