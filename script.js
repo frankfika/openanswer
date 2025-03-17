@@ -797,8 +797,8 @@ async function callLLMAPI(text) {
         const endpoint = window.API_CONFIG.endpoint;
         console.log('发送请求到:', endpoint);
         
-        // 优化提示词，让回答更简洁，并确保中文处理正确
-        const systemPrompt = "你是专业解题助手。请用中文回答，格式必须是：【答案】选项/结果 + 简短解释。不要犹豫，必须给出明确答案。如果是选择题，直接给出正确选项；如果是问答题，给出简洁明确的答案。不要说'我认为'或'可能'等模糊表达。英文问题用英文回答，格式为：【Answer】option/result + brief explanation。";
+        // 优化提示词，让回答更简洁，并确保中文处理正确，同时处理OCR识别问题
+        const systemPrompt = "你是专业解题助手。请注意：输入文本可能包含OCR识别错误、乱码或无关文字，请智能识别核心问题并忽略干扰内容。回答格式必须是：【答案】选项/结果 + 简短解释。不要犹豫，必须给出明确答案。如果是选择题，直接给出正确选项；如果是问答题，给出简洁明确的答案。不要说'我认为'或'可能'等模糊表达。英文问题用英文回答，格式为：【Answer】option/result + brief explanation。";
         
         // 检查文本是否包含中文
         const containsChinese = /[\u4e00-\u9fa5]/.test(text);
@@ -1104,14 +1104,45 @@ function processChineseText(text) {
         .replace(/\n+/g, '\n')
         .trim();
     
-    // 2. 移除非打印字符和特殊符号
+    // 2. 移除明显的乱码和无意义字符
+    // 移除单独的特殊符号和非常见字符
+    text = text.replace(/[\u0000-\u0020\u007F-\u00A0\u2000-\u200F\u2028-\u202F\u205F-\u206F\uFEFF\uFFF0-\uFFFF]/g, '');
+    
+    // 移除连续的标点符号（保留一个）
+    text = text.replace(/([.,?!;:'"()\[\]{}<>\/\\\-_+=@#$%^&*|~`])\1+/g, '$1');
+    
+    // 3. 移除非打印字符和特殊符号，但保留中文、英文、数字和常用标点
     text = text.replace(/[^\u4e00-\u9fa5a-zA-Z0-9.,?!;:'"()\[\]{}<>\/\\\s\-_+=@#$%^&*|~`]/g, '');
     
-    // 3. 修复常见OCR错误
+    // 4. 修复常见OCR错误
     text = postProcessChineseText(text);
     
-    // 4. 智能分段处理
+    // 5. 智能分段处理
     text = smartParagraphProcessing(text);
+    
+    // 6. 移除可能的题目编号和多余前缀
+    text = text.replace(/^[0-9]+[\s.、]|^[第]?[0-9一二三四五六七八九十]+[题问][\s.、]?/g, '');
+    
+    // 7. 移除可能的选项标记，但保留选项内容
+    text = text.replace(/[A-D][\s.、][^\n]+/g, (match) => match.substring(2));
+    
+    // 8. 移除可能的OCR错误导致的重复内容
+    const sentences = text.split(/[.。!！?？]/g).filter(s => s.trim().length > 0);
+    if (sentences.length > 1) {
+        for (let i = 0; i < sentences.length - 1; i++) {
+            const current = sentences[i].trim();
+            const next = sentences[i + 1].trim();
+            if (current && next && (current.includes(next) || next.includes(current))) {
+                // 保留较长的句子
+                if (current.length >= next.length) {
+                    sentences[i + 1] = '';
+                } else {
+                    sentences[i] = '';
+                }
+            }
+        }
+        text = sentences.filter(s => s).join('。 ');
+    }
     
     console.log('处理后文本:', text);
     return text;
@@ -1121,21 +1152,63 @@ function processChineseText(text) {
 function smartParagraphProcessing(text) {
     // 检测是否为问题文本
     const isQuestion = /[?？]/.test(text) || 
-                      /^(what|how|why|when|where|which|who|whose|whom|是什么|如何|为什么|什么时候|在哪里|哪一个|谁|谁的)/i.test(text);
+                      /^(what|how|why|when|where|which|who|whose|whom|是什么|如何|为什么|什么时候|在哪里|哪一个|谁|谁的|请问|解释|计算|求|证明|分析|比较|评价|讨论|列举|概述|总结)/i.test(text);
     
     // 如果是问题，尝试提取核心问题
     if (isQuestion) {
         // 按句子分割
         const sentences = text.split(/[.。!！?？]/g).filter(s => s.trim().length > 0);
         
-        // 找到包含问号的句子或最后一个句子
+        // 找到包含问号的句子
         const questionSentences = sentences.filter(s => /[?？]/.test(s));
+        
         if (questionSentences.length > 0) {
             // 如果有问号句子，使用它们
             return questionSentences.join(' ').trim();
-        } else if (sentences.length > 0) {
-            // 否则使用最后一个句子作为问题
-            return sentences[sentences.length - 1].trim();
+        } else {
+            // 尝试识别问题模式
+            const questionPatterns = [
+                // 选择题模式
+                /.*[A-D][.、].*[A-D][.、].*/,
+                // "下列"、"以下"等开头的选择题
+                /下列|以下|哪[一项个]|选择|判断/,
+                // 填空题模式
+                /填空|补充|完成/,
+                // 计算题模式
+                /计算|求|解|证明/
+            ];
+            
+            // 检查是否匹配任何问题模式
+            const matchingPatternSentences = sentences.filter(s => 
+                questionPatterns.some(pattern => pattern.test(s))
+            );
+            
+            if (matchingPatternSentences.length > 0) {
+                // 如果有匹配问题模式的句子，使用它们
+                return matchingPatternSentences.join(' ').trim();
+            } else if (sentences.length > 0) {
+                // 否则使用最后一个句子作为问题（通常问题在最后）
+                // 但如果最后一个句子太短，可能是OCR错误，则使用倒数第二个
+                const lastSentence = sentences[sentences.length - 1].trim();
+                if (lastSentence.length < 5 && sentences.length > 1) {
+                    return sentences[sentences.length - 2].trim();
+                }
+                return lastSentence;
+            }
+        }
+    }
+    
+    // 如果文本包含选项标记（A、B、C、D），可能是选择题
+    if (/[A-D][.、]/.test(text)) {
+        // 尝试提取题干和选项
+        const parts = text.split(/([A-D][.、])/);
+        if (parts.length > 1) {
+            // 题干通常在选项之前
+            const questionPart = parts[0].trim();
+            // 如果题干部分足够长，只返回题干
+            if (questionPart.length > 15) {
+                return questionPart;
+            }
         }
     }
     
