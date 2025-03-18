@@ -11,12 +11,13 @@ console.log('Loading environment variables...');
 console.log('LLM_MODEL:', process.env.LLM_MODEL);
 console.log('OCR_METHOD:', process.env.OCR_METHOD);
 console.log('SILICONFLOW_MODEL:', process.env.SILICONFLOW_MODEL);
+console.log('PORT:', process.env.PORT);
 
 // 加载配置
 const config = require('./config');
 
 const app = express();
-const port = process.env.PORT || 3000;
+const port = parseInt(process.env.PORT || '3000');
 
 // 存储百度 access token
 let baiduAccessToken = null;

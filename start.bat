@@ -1,6 +1,9 @@
 @echo off
 title OpenAnswer 智能解题助手
 
+:: 切换到脚本所在目录
+cd /d "%~dp0"
+
 :: 设置颜色
 set GREEN=[92m
 set YELLOW=[93m
@@ -49,6 +52,7 @@ if not exist .env (
     ) else (
         echo %RED%错误: 未找到 .env.example 模板文件%NC%
         echo 请确保您在正确的目录中运行此脚本
+        echo 当前目录: %cd%
         echo.
         echo 按任意键退出...
         pause >nul

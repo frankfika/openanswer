@@ -9,6 +9,11 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
+# 获取脚本所在目录的绝对路径
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+# 切换到脚本所在目录
+cd "$SCRIPT_DIR"
+
 # 显示欢迎信息
 echo -e "${GREEN}=======================================${NC}"
 echo -e "${GREEN}    欢迎使用 OpenAnswer 智能解题助手    ${NC}"
@@ -48,6 +53,7 @@ if [ ! -f .env ]; then
     else
         echo -e "${RED}错误: 未找到 .env.example 模板文件${NC}"
         echo "请确保您在正确的目录中运行此脚本"
+        echo "当前目录: $(pwd)"
         echo ""
         echo "按任意键退出..."
         read -n 1

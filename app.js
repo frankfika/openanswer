@@ -245,23 +245,26 @@ async function init() {
             console.warn('无法从服务器获取配置，使用默认配置:', err);
             // 使用硬编码的配置作为备份
             config = {
-                LLM_MODEL: 'siliconflow',
-                OCR_METHOD: 'local',  // 确保使用本地OCR
-                OCR_INTERVAL: 5000,
-                IMAGE_QUALITY: 0.8,
-                MAX_IMAGE_SIZE: 1600,
-                DEBUG: false,
-                SILICONFLOW_API_KEY: 'sk-xslmjbepeyaybceopnrnndvgpicchzmldfsszminyjubkdnk',
-                SILICONFLOW_API_ENDPOINT: 'https://api.siliconflow.cn/v1/chat/completions',
-                SILICONFLOW_MODEL: 'internlm/internlm2_5-20b-chat',
-                DEEPSEEK_API_KEY: 'sk-f8614f81212040d8bba9205c2022eee2',
-                DEEPSEEK_API_ENDPOINT: 'https://api.deepseek.com/v1/chat/completions',
-                DEEPSEEK_MODEL: 'deepseek-reasoner',
+                LLM_MODEL: process.env.LLM_MODEL || 'siliconflow',
+                OCR_METHOD: process.env.OCR_METHOD || 'local',
+                OCR_INTERVAL: parseInt(process.env.OCR_INTERVAL || '5000'),
+                IMAGE_QUALITY: parseFloat(process.env.IMAGE_QUALITY || '0.8'),
+                MAX_IMAGE_SIZE: parseInt(process.env.MAX_IMAGE_SIZE || '1600'),
+                DEBUG: process.env.DEBUG === 'true',
+                SILICONFLOW_API_KEY: process.env.SILICONFLOW_API_KEY || 'sk-xslmjbepeyaybceopnrnndvgpicchzmldfsszminyjubkdnk',
+                SILICONFLOW_API_ENDPOINT: process.env.SILICONFLOW_API_ENDPOINT || 'https://api.siliconflow.cn/v1/chat/completions',
+                SILICONFLOW_MODEL: process.env.SILICONFLOW_MODEL || 'internlm/internlm2_5-20b-chat',
+                DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY || 'sk-f8614f81212040d8bba9205c2022eee2',
+                DEEPSEEK_API_ENDPOINT: process.env.DEEPSEEK_API_ENDPOINT || 'https://api.deepseek.com/v1/chat/completions',
+                DEEPSEEK_MODEL: process.env.DEEPSEEK_MODEL || 'deepseek-reasoner',
+                // 百度OCR配置
+                BAIDU_API_KEY: process.env.BAIDU_API_KEY || '',
+                BAIDU_SECRET_KEY: process.env.BAIDU_SECRET_KEY || '',
+                FORCE_VALIDATE_BAIDU: false,
                 // 添加空的百度OCR配置，但不强制验证
                 BAIDU_OCR_APP_ID: '',
                 BAIDU_OCR_API_KEY: '',
                 BAIDU_OCR_SECRET_KEY: '',
-                FORCE_VALIDATE_BAIDU: false
             };
         }
         
