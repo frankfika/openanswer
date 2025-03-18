@@ -51,10 +51,16 @@ class ConsoleLogger extends ILogger {
 // 应用核心类
 class Application {
     constructor(config) {
+        console.log('初始化Application...');
         this.logger = new ConsoleLogger(config.DEBUG);
         this.config = new ConfigManager(config);
         this.ui = new UIManager(this.logger);
         this.textProcessor = new TextProcessor();
+        
+        // 先设置为全局变量，以便服务初始化时能获取配置
+        window.app = this;
+        
+        // 初始化服务
         this.ocrService = new OCRService(this.logger);
         this.llmService = new LLMService(this.logger);
         
@@ -67,6 +73,8 @@ class Application {
         
         // 绑定方法到实例
         this.processFrame = this.processFrame.bind(this);
+        
+        console.log('Application初始化完成');
     }
 
     async start() {
@@ -180,21 +188,46 @@ class Application {
         const base64Image = this.ui.elements.canvas.toDataURL('image/jpeg', imageQuality);
         
         this.ui.updateStatus('🔍 正在识别文字...');
-        const recognizedText = await this.ocrService.recognize(base64Image);
         
-        if (!recognizedText || recognizedText.length < 10) {
-            this.handleShortText(recognizedText);
-            return;
-        }
-        
-        const similarity = TextProcessor.similarity(recognizedText, this.state.lastRecognizedText);
-        const isNewText = similarity < 0.7 || !this.state.lastRecognizedText;
-        
-        if (isNewText) {
-            await this.handleNewText(recognizedText);
-        } else {
-            this.logger.info('⏭️ 文本相似，跳过处理');
-            this.ui.updateStatus('✅ 文本未变化，等待新问题...');
+        try {
+            // 添加OCR超时处理
+            const recognizePromise = this.ocrService.recognize(base64Image);
+            const timeoutPromise = new Promise((_, reject) => {
+                setTimeout(() => reject(new Error('OCR识别超时')), 10000);
+            });
+            
+            // 使用Promise.race来实现超时处理
+            const recognizedText = await Promise.race([recognizePromise, timeoutPromise]);
+            
+            if (!recognizedText || recognizedText.length < 10) {
+                this.handleShortText(recognizedText);
+                return;
+            }
+            
+            const similarity = TextProcessor.similarity(recognizedText, this.state.lastRecognizedText);
+            console.log(`文本相似度: ${(similarity * 100).toFixed(2)}%, 原文本: "${this.state.lastRecognizedText.substring(0, 20)}...", 新文本: "${recognizedText.substring(0, 20)}..."`);
+            
+            // 将相似度阈值从0.6降低到0.4，极大提高文本变化敏感度
+            const isNewText = similarity < 0.4 || !this.state.lastRecognizedText;
+            
+            if (isNewText) {
+                await this.handleNewText(recognizedText);
+            } else {
+                this.logger.info('⏭️ 文本相似，跳过处理');
+                this.ui.updateStatus('✅ 文本未变化，等待新问题...');
+            }
+        } catch (error) {
+            this.logger.error('OCR识别失败:', error);
+            
+            // 如果是OCR超时，显示特定消息
+            if (error.message === 'OCR识别超时') {
+                this.ui.updateStatus('⏱️ OCR识别超时，将在下一帧重试...');
+            } else {
+                this.ui.updateStatus(`❌ OCR识别失败: ${error.message}`);
+            }
+            
+            // 等待一秒钟后继续处理下一帧
+            await new Promise(resolve => setTimeout(resolve, 1000));
         }
     }
 
@@ -268,7 +301,7 @@ async function init() {
             };
         }
         
-        // 添加全局状态更新函数
+        // 将 updateStatus 函数绑定到全局对象，以便从其他组件访问
         window.updateStatus = function(status) {
             const statusEl = document.getElementById('status-content');
             if (statusEl) {
@@ -285,6 +318,8 @@ async function init() {
         });
         
         const app = new Application(config);
+        // 将应用实例设置为全局变量，以便其他组件访问
+        window.app = app;
         app.start();
     } catch (error) {
         console.error('初始化错误:', error);

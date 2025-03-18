@@ -74,7 +74,7 @@ app.get('/config', (req, res) => {
   const configResponse = {
     // 使用大写键名，与前端期望的格式一致
     LLM_MODEL: process.env.LLM_MODEL || 'siliconflow',
-    OCR_METHOD: 'local', // 强制使用本地OCR
+    OCR_METHOD: process.env.OCR_METHOD || 'local', // 使用环境变量中的OCR方法
     OCR_INTERVAL: parseInt(process.env.OCR_INTERVAL || '5000'),
     IMAGE_QUALITY: parseFloat(process.env.IMAGE_QUALITY || '0.8'),
     MAX_IMAGE_SIZE: parseInt(process.env.MAX_IMAGE_SIZE || '1600'),
@@ -103,7 +103,7 @@ app.get('/config', (req, res) => {
     hasKey: process.env.LLM_MODEL === 'siliconflow'
       ? !!process.env.SILICONFLOW_API_KEY
       : !!process.env.DEEPSEEK_API_KEY,
-    ocrMethod: 'local',
+    ocrMethod: process.env.OCR_METHOD || 'local',
     siliconflowModel: process.env.SILICONFLOW_MODEL || 'internlm/internlm2_5-20b-chat'
   };
   
@@ -111,10 +111,22 @@ app.get('/config', (req, res) => {
     LLM_MODEL: configResponse.LLM_MODEL,
     OCR_METHOD: configResponse.OCR_METHOD,
     SILICONFLOW_API_KEY: configResponse.SILICONFLOW_API_KEY ? '已设置' : '未设置',
-    DEEPSEEK_API_KEY: configResponse.DEEPSEEK_API_KEY ? '已设置' : '未设置'
+    DEEPSEEK_API_KEY: configResponse.DEEPSEEK_API_KEY ? '已设置' : '未设置',
+    BAIDU_API_KEY: configResponse.BAIDU_OCR_API_KEY ? '已设置' : '未设置'
   });
   
   res.json(configResponse);
+});
+
+// 提供百度OCR token的API
+app.get('/baidu-token', async (req, res) => {
+  try {
+    const token = await ensureValidToken();
+    res.json({ access_token: token });
+  } catch (error) {
+    console.error('获取百度token失败:', error);
+    res.status(500).json({ error: 'Failed to get Baidu token' });
+  }
 });
 
 // 错误处理中间件

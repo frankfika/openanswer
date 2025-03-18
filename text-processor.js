@@ -150,7 +150,7 @@ class TextProcessor {
         const wordSimilarity = wordsA.length && wordsB.length ? 
             (2.0 * commonWords.length) / (wordsA.length + wordsB.length) : 0;
         
-        const similarity = (editSimilarity * 0.7) + (wordSimilarity * 0.3);
+        const similarity = (editSimilarity * 0.8) + (wordSimilarity * 0.2);
         
         if (window.DEBUG) {
             console.log('📊 文本相似度详情:', {
@@ -160,7 +160,8 @@ class TextProcessor {
                 editSimilarity: editSimilarity.toFixed(3),
                 commonWords,
                 wordSimilarity: wordSimilarity.toFixed(3),
-                finalSimilarity: similarity.toFixed(3)
+                finalSimilarity: similarity.toFixed(3),
+                weights: '编辑距离:0.8, 单词匹配:0.2'
             });
         }
         

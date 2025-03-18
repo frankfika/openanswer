@@ -87,18 +87,37 @@ export class ConfigManager {
     }
 
     getOCRConfig() {
-        const { OCR_METHOD, BAIDU_OCR_APP_ID, BAIDU_OCR_API_KEY, 
-                BAIDU_OCR_SECRET_KEY, OCR_INTERVAL, IMAGE_QUALITY, MAX_IMAGE_SIZE } = this.config;
+        // 支持.env文件中可能使用的不同配置字段名
+        const ocr_method = this.config.OCR_METHOD || this.config.ocr_method || 'local';
+        const interval = this.config.OCR_INTERVAL || this.config.ocr_interval || 5000;
+        const image_quality = this.config.IMAGE_QUALITY || this.config.image_quality || 0.8;
+        const max_image_size = this.config.MAX_IMAGE_SIZE || this.config.max_image_size || 1600;
+        
+        // 支持不同的百度API字段命名
+        const baidu_app_id = this.config.BAIDU_OCR_APP_ID || this.config.BAIDU_APP_ID;
+        const baidu_api_key = this.config.BAIDU_OCR_API_KEY || this.config.BAIDU_API_KEY;
+        const baidu_secret_key = this.config.BAIDU_OCR_SECRET_KEY || this.config.BAIDU_SECRET_KEY;
 
+        console.log('配置管理器: 获取OCR配置', {
+            method: ocr_method,
+            interval,
+            baidu_api_key: baidu_api_key ? '已配置' : '未配置',
+            baidu_secret_key: baidu_secret_key ? '已配置' : '未配置'
+        });
+        
         return {
-            method: OCR_METHOD || 'local',
-            interval: OCR_INTERVAL || 5000,
-            imageQuality: IMAGE_QUALITY || 0.8,
-            maxImageSize: MAX_IMAGE_SIZE || 1600,
-            baidu: OCR_METHOD === 'baidu' ? {
-                appId: BAIDU_OCR_APP_ID,
-                apiKey: BAIDU_OCR_API_KEY,
-                secretKey: BAIDU_OCR_SECRET_KEY
+            method: ocr_method,
+            interval: interval,
+            imageQuality: image_quality,
+            maxImageSize: max_image_size,
+            // 确保所有需要的配置字段都可用
+            BAIDU_API_KEY: baidu_api_key,
+            BAIDU_SECRET_KEY: baidu_secret_key,
+            // 保持原有结构的兼容性
+            baidu: ocr_method === 'baidu' ? {
+                appId: baidu_app_id,
+                apiKey: baidu_api_key,
+                secretKey: baidu_secret_key
             } : null
         };
     }
